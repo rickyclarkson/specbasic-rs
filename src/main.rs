@@ -50,11 +50,11 @@ impl Command for LetCommand {
 }
 
 struct PrintCommand {
-    expression: Expression
+    expressions: Vec<Expression>
 }
 impl Command for PrintCommand {
     fn run(&self, env: &mut Env) -> String {
-        self.expression.to_string(&env) + "\n"
+        self.expressions.iter().map(|e| e.to_string(&env)).collect::<Vec<String>>().join(", ") + "\n"
     }
 }
 
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn let_and_print() {
         let mut program = Program::new();
-        program.add_line(20, Box::new(PrintCommand { expression: Expression::NumberVariableExpression("a".to_string()) }));
+        program.add_line(20, Box::new(PrintCommand { expressions: vec!(Expression::NumberVariableExpression("a".to_string())) }));
         program.add_line(10, Box::new(LetCommand {
                 variable_name: "a".to_string(),
                 value: Expression::IntExpression(10)
@@ -106,9 +106,9 @@ mod tests {
     fn print_adding_vars() {
         let mut program = Program::new();
         program.add_line(20, Box::new(PrintCommand {
-                expression: Expression::Plus(
+                expressions: vec!(Expression::Plus(
                                 Box::new(Expression::NumberVariableExpression("a".to_string())),
-                                Box::new(Expression::NumberVariableExpression("b".to_string())))
+                                Box::new(Expression::NumberVariableExpression("b".to_string()))))
             }));
         program.add_line(10, Box::new(LetCommand {
                 variable_name: "a".to_string(),
@@ -120,6 +120,25 @@ mod tests {
             }));
             
         assert_eq!(program.run(), "25\n");
+    }
+
+    #[test]
+    fn print_with_comma() {
+        let mut program = Program::new();
+        program.add_line(10, Box::new(LetCommand {
+            variable_name: "a".to_string(),
+            value: Expression::IntExpression(10)
+        }));
+        program.add_line(15, Box::new(LetCommand {
+            variable_name: "b".to_string(),
+            value: Expression::IntExpression(15)
+        }));
+        program.add_line(20, Box::new(PrintCommand {
+            expressions: vec!(Expression::NumberVariableExpression("a".to_string()),
+            Expression::NumberVariableExpression("b".to_string()))
+        }));
+
+        assert_eq!(program.run(), "10, 15\n");
     }
 }
 
