@@ -2,13 +2,15 @@ use std::collections::{BTreeMap, HashMap};
 
 enum Expression {
     IntExpression(i32),
-    NumberVariableExpression(String)
+    NumberVariableExpression(String),
+    Plus(Box<Expression>, Box<Expression>),
 }
 impl Expression {
     fn to_string(&self, env: &Env) -> String {
         match self {
             Expression::IntExpression(value) => value.to_string(),
             Expression::NumberVariableExpression(number_variable_name) => env.number_variables.get(number_variable_name).unwrap().to_string(),
+            Expression::Plus(left, right) => (left.to_f64(&env) + right.to_f64(&env)).to_string()
         }
     }
 
@@ -16,6 +18,7 @@ impl Expression {
         match self {
             Expression::IntExpression(value) => *value as f64,
             Expression::NumberVariableExpression(number_variable_name) => *env.number_variables.get(number_variable_name).unwrap(),
+            Expression::Plus(left, right) => left.to_f64(&env) + right.to_f64(&env)
         }
     }
 }
@@ -55,10 +58,10 @@ impl Command for PrintCommand {
     }
 }
 
+#[derive(Default)]
 struct Program {
     lines: BTreeMap<i32, Box<dyn Command>>
 }
-
 impl Program {
     fn new() -> Program {
         Program {
@@ -66,8 +69,9 @@ impl Program {
         }
     }
 
-    fn add_line(&mut self, line_number: i32, command: Box<dyn Command>) {
+    fn add_line(&mut self, line_number: i32, command: Box<dyn Command>) -> &mut Self {
       self.lines.insert(line_number, command);
+      self
     }
 
     fn run(&self) -> String {
@@ -96,6 +100,26 @@ mod tests {
             }));
         let output = program.run();
         assert_eq!(output, "10\n");
+    }
+
+    #[test]
+    fn print_adding_vars() {
+        let mut program = Program::new();
+        program.add_line(20, Box::new(PrintCommand {
+                expression: Expression::Plus(
+                                Box::new(Expression::NumberVariableExpression("a".to_string())),
+                                Box::new(Expression::NumberVariableExpression("b".to_string())))
+            }));
+        program.add_line(10, Box::new(LetCommand {
+                variable_name: "a".to_string(),
+                value: Expression::IntExpression(10)
+            }));
+        program.add_line(15, Box::new(LetCommand {
+                variable_name: "b".to_string(),
+                value: Expression::IntExpression(15)
+            }));
+            
+        assert_eq!(program.run(), "25\n");
     }
 }
 
