@@ -5,9 +5,9 @@ use std::vec::Vec;
 
 #[derive(Clone)]
 enum Expression {
-    IntExpression(i32),
-    StringExpression(String),
-    NumberVariableExpression(String),
+    Integer(i32),
+    Text(String),
+    NumberVariable(String),
     Plus(Box<Expression>, Box<Expression>),
     Subtract(Box<Expression>, Box<Expression>),
     Multiply(Box<Expression>, Box<Expression>),
@@ -16,47 +16,47 @@ enum Expression {
 impl Expression {
     fn to_string(&self, env: &Env) -> Result<String, &str> {
         match self {
-            Expression::IntExpression(value) => Ok(value.to_string()),
-            Expression::StringExpression(text) => Ok(text.to_string()),
-            Expression::NumberVariableExpression(number_variable_name) => Ok(env
+            Expression::Integer(value) => Ok(value.to_string()),
+            Expression::Text(text) => Ok(text.to_string()),
+            Expression::NumberVariable(number_variable_name) => Ok(env
                 .number_variables
                 .get(number_variable_name)
                 .unwrap()
                 .to_string()),
-            Expression::Plus(_, _) => self.to_f64(&env).map(|v| v.to_string()),
-            Expression::Subtract(_, _) => self.to_f64(&env).map(|v| v.to_string()),
-            Expression::Multiply(_, _) => self.to_f64(&env).map(|v| v.to_string()),
-            Expression::Divide(_, _) => self.to_f64(&env).map(|v| v.to_string()),
+            Expression::Plus(_, _) => self.to_f64(env).map(|v| v.to_string()),
+            Expression::Subtract(_, _) => self.to_f64(env).map(|v| v.to_string()),
+            Expression::Multiply(_, _) => self.to_f64(env).map(|v| v.to_string()),
+            Expression::Divide(_, _) => self.to_f64(env).map(|v| v.to_string()),
         }
     }
 
     fn to_f64(&self, env: &Env) -> Result<f64, &str> {
         match self {
-            Expression::IntExpression(value) => Ok(*value as f64),
-            Expression::StringExpression(text) => {
+            Expression::Integer(value) => Ok(*value as f64),
+            Expression::Text(text) => {
                 Err("Expected a number, found something else, but I can't figure out how to include that in the error")
             }
-            Expression::NumberVariableExpression(number_variable_name) =>
+            Expression::NumberVariable(number_variable_name) =>
                 match env.number_variables.get(number_variable_name) {
                     Some(value) => Ok(*value),
                     None => Err("No such variable found, not sure how to say which.")
                 },
-            Expression::Plus(left, right) => match (left.to_f64(&env), right.to_f64(&env)) {
+            Expression::Plus(left, right) => match (left.to_f64(env), right.to_f64(env)) {
                 (Ok(l), Ok(r)) => Ok(l + r),
                 (Ok(_), Err(e)) => Err(e),
                 (Err(e), _) => Err(e),
             },
-            Expression::Subtract(left, right) => match (left.to_f64(&env), right.to_f64(&env)) {
+            Expression::Subtract(left, right) => match (left.to_f64(env), right.to_f64(env)) {
                 (Ok(l), Ok(r)) => Ok(l - r),
                 (Ok(_), Err(e)) => Err(e),
                 (Err(e), _) => Err(e),
             },
-            Expression::Multiply(left, right) => match (left.to_f64(&env), right.to_f64(&env)) {
+            Expression::Multiply(left, right) => match (left.to_f64(env), right.to_f64(env)) {
                 (Ok(l), Ok(r)) => Ok(l * r),
                 (Ok(_), Err(e)) => Err(e),
                 (Err(e), _) => Err(e),
             },
-            Expression::Divide(left, right) => match (left.to_f64(&env), right.to_f64(&env)) {
+            Expression::Divide(left, right) => match (left.to_f64(env), right.to_f64(env)) {
                 (Ok(l), Ok(r)) => Ok(l / r),
                 (Ok(_), Err(e)) => Err(e),
                 (Err(e), _) => Err(e),
@@ -74,7 +74,7 @@ impl UserInputReader {
         match self {
             UserInputReader::RealStdin => {
                 let mut output = String::new();
-                stdin().read_line(&mut output);
+                stdin().read_line(&mut output).unwrap();
                 output
             },
             UserInputReader::FakeStdin(input) => input.to_string(),
@@ -106,40 +106,40 @@ enum CommandResult {
 
 #[derive(Clone)]
 enum Command {
-    LetCommand(String, Expression),
-    GotoCommand(i32),
-    PrintCommand(Vec<Expression>),
-    InputCommand(Vec<Expression>),
-    RemCommand(String),
+    Let(String, Expression),
+    Goto(i32),
+    Print(Vec<Expression>),
+    Input(Vec<Expression>),
+    Rem(String),
 }
 impl Command {
     fn run(&self, env: &mut Env) -> Result<CommandResult, String> {
         match self {
-            Command::LetCommand(variable_name, value) => match value.to_f64(&env) {
+            Command::Let(variable_name, value) => match value.to_f64(env) {
                 Ok(number) => {
                     env.number_variables.insert(variable_name.clone(), number);
                     Ok(CommandResult::Output(String::new()))
                 }
                 Err(msg) => Err(msg.to_string()),
             },
-            Command::GotoCommand(line_number) => Ok(CommandResult::Jump(*line_number)),
-            Command::PrintCommand(expressions) => Ok(CommandResult::Output(
+            Command::Goto(line_number) => Ok(CommandResult::Jump(*line_number)),
+            Command::Print(expressions) => Ok(CommandResult::Output(
                 expressions
                     .iter()
-                    .flat_map(|e| e.to_string(&env))
+                    .flat_map(|e| e.to_string(env))
                     .collect::<Vec<String>>()
                     .join(" ")
                     + "\n",
             )),
-            Command::InputCommand(expressions) => {
+            Command::Input(expressions) => {
                 let mut output = String::new();
                 for expression in expressions {
                     match expression {
-                        Expression::StringExpression(text) => {
+                        Expression::Text(text) => {
                             output.push_str(text);
-                            output.push_str("\n");
+                            output.push('\n');
                         }
-                        Expression::NumberVariableExpression(name) => {
+                        Expression::NumberVariable(name) => {
                             let value = env.read_line();
                             match value.parse::<f64>() {
                                 Ok(v) => {
@@ -157,7 +157,7 @@ impl Command {
                 }
                 Ok(CommandResult::Output(output))
             }
-            Command::RemCommand(_) => Ok(CommandResult::Output(String::new())),
+            Command::Rem(_) => Ok(CommandResult::Output(String::new())),
         }
     }
 }
@@ -193,35 +193,35 @@ impl Program {
 
     fn run(
         &self,
-        linesLimit: LinesLimit,
+        lines_limit: LinesLimit,
         user_input_reader: UserInputReader,
     ) -> Result<String, String> {
         let mut output = String::new();
         let mut env = Env::new(user_input_reader);
 
         self.run_helper(
-            linesLimit,
+            lines_limit,
             &mut output,
             &mut env,
-            Box::new(self.lines.clone()),
+            self.lines.clone(),
         )
     }
 
     fn run_helper(
         &self,
-        linesLimit: LinesLimit,
+        lines_limit: LinesLimit,
         output: &mut String,
         env: &mut Env,
-        lines: Box<BTreeMap<i32, Command>>,
+        lines: BTreeMap<i32, Command>,
     ) -> Result<String, String> {
-        for (_, command) in *lines {
+        for (_, command) in lines {
             match &(command.run(env)) {
                 Ok(CommandResult::Output(text)) => output.push_str(text),
                 Ok(CommandResult::Jump(line_number)) => {
-                    match linesLimit {
+                    match lines_limit {
                         LinesLimit::NoLimit => {}
                         LinesLimit::Limit(x) if x >= 1 => {}
-                        LinesLimit::Limit(x) => return Ok(output.to_string()),
+                        LinesLimit::Limit(_) => return Ok(output.to_string()),
                     }
 
                     let mut child_lines: BTreeMap<i32, Command> = BTreeMap::new();
@@ -232,10 +232,10 @@ impl Program {
                         }
                     }
                     return self.run_helper(
-                        linesLimit.decrement(),
+                        lines_limit.decrement(),
                         output,
                         env,
-                        Box::new(child_lines.clone()),
+                        child_lines.clone(),
                     );
                 }
                 Err(msg) => return Err(msg.to_string()),
@@ -248,7 +248,6 @@ impl Program {
 #[cfg(test)]
 mod tests {
     use crate::*;
-    use std::io::stdin;
     use Command::*;
 
     #[test]
@@ -256,11 +255,11 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             20,
-            PrintCommand(vec![Expression::NumberVariableExpression("a".to_string())]),
+            Print(vec![Expression::NumberVariable("a".to_string())]),
         );
         program.add_line(
             10,
-            LetCommand("a".to_string(), Expression::IntExpression(10)),
+            Let("a".to_string(), Expression::Integer(10)),
         );
         let output = program.run(
             LinesLimit::NoLimit,
@@ -274,18 +273,18 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             20,
-            PrintCommand(vec![Expression::Plus(
-                Box::new(Expression::NumberVariableExpression("a".to_string())),
-                Box::new(Expression::NumberVariableExpression("b".to_string())),
+            Print(vec![Expression::Plus(
+                Box::new(Expression::NumberVariable("a".to_string())),
+                Box::new(Expression::NumberVariable("b".to_string())),
             )]),
         );
         program.add_line(
             10,
-            LetCommand("a".to_string(), Expression::IntExpression(10)),
+            Let("a".to_string(), Expression::Integer(10)),
         );
         program.add_line(
             15,
-            LetCommand("b".to_string(), Expression::IntExpression(15)),
+            Let("b".to_string(), Expression::Integer(15)),
         );
 
         assert_eq!(
@@ -299,17 +298,17 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            LetCommand("a".to_string(), Expression::IntExpression(10)),
+            Let("a".to_string(), Expression::Integer(10)),
         );
         program.add_line(
             15,
-            LetCommand("b".to_string(), Expression::IntExpression(15)),
+            Let("b".to_string(), Expression::Integer(15)),
         );
         program.add_line(
             20,
-            PrintCommand(vec![
-                Expression::NumberVariableExpression("a".to_string()),
-                Expression::NumberVariableExpression("b".to_string()),
+            Print(vec![
+                Expression::NumberVariable("a".to_string()),
+                Expression::NumberVariable("b".to_string()),
             ]),
         );
 
@@ -322,7 +321,7 @@ mod tests {
     #[test]
     fn rem() {
         let mut program = Program::new();
-        program.add_line(10, RemCommand(String::new()));
+        program.add_line(10, Rem(String::new()));
 
         assert_eq!(
             program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
@@ -333,7 +332,7 @@ mod tests {
     #[test]
     fn print_with_no_expressions() {
         let mut program = Program::new();
-        program.add_line(10, PrintCommand(vec![]));
+        program.add_line(10, Print(vec![]));
 
         assert_eq!(
             program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
@@ -347,9 +346,9 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            PrintCommand(vec![Expression::Subtract(
-                Box::new(Expression::IntExpression(90)),
-                Box::new(Expression::IntExpression(32)),
+            Print(vec![Expression::Subtract(
+                Box::new(Expression::Integer(90)),
+                Box::new(Expression::Integer(32)),
             )]),
         );
 
@@ -365,9 +364,9 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            PrintCommand(vec![Expression::Multiply(
-                Box::new(Expression::IntExpression(58)),
-                Box::new(Expression::IntExpression(5)),
+            Print(vec![Expression::Multiply(
+                Box::new(Expression::Integer(58)),
+                Box::new(Expression::Integer(5)),
             )]),
         );
 
@@ -383,15 +382,15 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            PrintCommand(vec![Expression::Divide(
+            Print(vec![Expression::Divide(
                 Box::new(Expression::Multiply(
                     Box::new(Expression::Subtract(
-                        Box::new(Expression::IntExpression(41)),
-                        Box::new(Expression::IntExpression(32)),
+                        Box::new(Expression::Integer(41)),
+                        Box::new(Expression::Integer(32)),
                     )),
-                    Box::new(Expression::IntExpression(5)),
+                    Box::new(Expression::Integer(5)),
                 )),
-                Box::new(Expression::IntExpression(9)),
+                Box::new(Expression::Integer(9)),
             )]),
         );
 
@@ -408,11 +407,11 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            PrintCommand(vec![Expression::StringExpression(
+            Print(vec![Expression::Text(
                 "Hello, World!".to_string(),
             )]),
         );
-        program.add_line(20, GotoCommand(10));
+        program.add_line(20, Goto(10));
 
         assert_eq!(
             program.run(LinesLimit::Limit(1), UserInputReader::RealStdin),
@@ -427,16 +426,16 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            InputCommand(vec![
-                Expression::StringExpression("Enter deg F".to_string()),
-                Expression::NumberVariableExpression("F".to_string()),
+            Input(vec![
+                Expression::Text("Enter deg F".to_string()),
+                Expression::NumberVariable("F".to_string()),
             ]),
         );
         program.add_line(
             20,
-            PrintCommand(vec![
-                Expression::StringExpression("You gave".to_string()),
-                Expression::NumberVariableExpression("F".to_string()),
+            Print(vec![
+                Expression::Text("You gave".to_string()),
+                Expression::NumberVariable("F".to_string()),
             ]),
         );
 
