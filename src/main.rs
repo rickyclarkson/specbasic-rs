@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
-use std::vec::Vec;
+use std::io::stdin;
 use std::result::Result;
+use std::vec::Vec;
 
 #[derive(Clone)]
 enum Expression {
@@ -64,14 +65,37 @@ impl Expression {
     }
 }
 
+enum UserInputReader {
+    RealStdin,
+    FakeStdin(String),
+}
+impl UserInputReader {
+    fn next(&self) -> String {
+        match self {
+            UserInputReader::RealStdin => {
+                let mut output = String::new();
+                stdin().read_line(&mut output);
+                output
+            },
+            UserInputReader::FakeStdin(input) => input.to_string(),
+        }
+    }
+}
+
 struct Env {
     number_variables: HashMap<String, f64>,
+    user_input_reader: UserInputReader,
 }
 impl Env {
-    fn new() -> Env {
+    fn new(user_input_reader: UserInputReader) -> Env {
         Env {
             number_variables: HashMap::new(),
+            user_input_reader: user_input_reader,
         }
+    }
+
+    fn read_line(&self) -> String {
+        self.user_input_reader.next()
     }
 }
 
@@ -85,27 +109,55 @@ enum Command {
     LetCommand(String, Expression),
     GotoCommand(i32),
     PrintCommand(Vec<Expression>),
+    InputCommand(Vec<Expression>),
     RemCommand(String),
 }
 impl Command {
-    fn run(&self, env: &mut Env) -> Result<CommandResult, &str> {
+    fn run(&self, env: &mut Env) -> Result<CommandResult, String> {
         match self {
-            Command::LetCommand(variable_name, value) => {
-                match value.to_f64(&env) {
-                    Ok(number) => {
-                        env.number_variables.insert(variable_name.clone(), number);
-                        Ok(CommandResult::Output(String::new()))
-                    },
-                    Err(msg) => Err(msg),
+            Command::LetCommand(variable_name, value) => match value.to_f64(&env) {
+                Ok(number) => {
+                    env.number_variables.insert(variable_name.clone(), number);
+                    Ok(CommandResult::Output(String::new()))
                 }
+                Err(msg) => Err(msg.to_string()),
             },
             Command::GotoCommand(line_number) => Ok(CommandResult::Jump(*line_number)),
             Command::PrintCommand(expressions) => Ok(CommandResult::Output(
-                    expressions.iter().flat_map(|e| e.to_string(&env))
+                expressions
+                    .iter()
+                    .flat_map(|e| e.to_string(&env))
                     .collect::<Vec<String>>()
-                    .join(", ")
-                    + "\n")),
-            Command::RemCommand(comment) => Ok(CommandResult::Output(String::new())),
+                    .join(" ")
+                    + "\n",
+            )),
+            Command::InputCommand(expressions) => {
+                let mut output = String::new();
+                for expression in expressions {
+                    match expression {
+                        Expression::StringExpression(text) => {
+                            output.push_str(text);
+                            output.push_str("\n");
+                        }
+                        Expression::NumberVariableExpression(name) => {
+                            let value = env.read_line();
+                            match value.parse::<f64>() {
+                                Ok(v) => {
+                                    env.number_variables.insert(name.to_owned(), v);
+                                }
+                                Err(msg) => {
+                                    return Err(msg.to_string());
+                                }
+                            }
+                        }
+                        _ => {
+                            return Err("Unexpected expression type found, and I don't know how to report which".to_string());
+                        }
+                    }
+                }
+                Ok(CommandResult::Output(output))
+            }
+            Command::RemCommand(_) => Ok(CommandResult::Output(String::new())),
         }
     }
 }
@@ -139,21 +191,36 @@ impl Program {
         self
     }
 
-    fn run(&self, linesLimit: LinesLimit) -> Result<String, String> {
+    fn run(
+        &self,
+        linesLimit: LinesLimit,
+        user_input_reader: UserInputReader,
+    ) -> Result<String, String> {
         let mut output = String::new();
-        let mut env = Env::new();
+        let mut env = Env::new(user_input_reader);
 
-        self.run_helper(linesLimit, &mut output, &mut env, Box::new(self.lines.clone()))
+        self.run_helper(
+            linesLimit,
+            &mut output,
+            &mut env,
+            Box::new(self.lines.clone()),
+        )
     }
 
-    fn run_helper(&self, linesLimit: LinesLimit, output: &mut String, env: &mut Env, lines: Box<BTreeMap<i32, Command>>) -> Result<String, String> {
+    fn run_helper(
+        &self,
+        linesLimit: LinesLimit,
+        output: &mut String,
+        env: &mut Env,
+        lines: Box<BTreeMap<i32, Command>>,
+    ) -> Result<String, String> {
         for (_, command) in *lines {
             match &(command.run(env)) {
                 Ok(CommandResult::Output(text)) => output.push_str(text),
                 Ok(CommandResult::Jump(line_number)) => {
                     match linesLimit {
-                        LinesLimit::NoLimit => {},
-                        LinesLimit::Limit(x) if x >= 1 => {},
+                        LinesLimit::NoLimit => {}
+                        LinesLimit::Limit(x) if x >= 1 => {}
                         LinesLimit::Limit(x) => return Ok(output.to_string()),
                     }
 
@@ -164,7 +231,12 @@ impl Program {
                             child_lines.insert(*l, unboxed_command);
                         }
                     }
-                    return self.run_helper(linesLimit.decrement(), output, env, Box::new(child_lines.clone()));
+                    return self.run_helper(
+                        linesLimit.decrement(),
+                        output,
+                        env,
+                        Box::new(child_lines.clone()),
+                    );
                 }
                 Err(msg) => return Err(msg.to_string()),
             }
@@ -176,6 +248,7 @@ impl Program {
 #[cfg(test)]
 mod tests {
     use crate::*;
+    use std::io::stdin;
     use Command::*;
 
     #[test]
@@ -183,11 +256,16 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             20,
-            PrintCommand(vec![Expression::NumberVariableExpression("a".to_string())]));
+            PrintCommand(vec![Expression::NumberVariableExpression("a".to_string())]),
+        );
         program.add_line(
             10,
-            LetCommand("a".to_string(), Expression::IntExpression(10)));
-        let output = program.run(LinesLimit::NoLimit);
+            LetCommand("a".to_string(), Expression::IntExpression(10)),
+        );
+        let output = program.run(
+            LinesLimit::NoLimit,
+            UserInputReader::RealStdin
+        );
         assert_eq!(output, Ok("10\n".to_string()));
     }
 
@@ -197,17 +275,23 @@ mod tests {
         program.add_line(
             20,
             PrintCommand(vec![Expression::Plus(
-                    Box::new(Expression::NumberVariableExpression("a".to_string())),
-                    Box::new(Expression::NumberVariableExpression("b".to_string())),
-                )]));
+                Box::new(Expression::NumberVariableExpression("a".to_string())),
+                Box::new(Expression::NumberVariableExpression("b".to_string())),
+            )]),
+        );
         program.add_line(
             10,
-            LetCommand("a".to_string(), Expression::IntExpression(10)));
+            LetCommand("a".to_string(), Expression::IntExpression(10)),
+        );
         program.add_line(
             15,
-            LetCommand("b".to_string(), Expression::IntExpression(15)));
+            LetCommand("b".to_string(), Expression::IntExpression(15)),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit), Ok("25\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("25\n".to_string())
+        );
     }
 
     #[test]
@@ -215,38 +299,46 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            LetCommand("a".to_string(), Expression::IntExpression(10)));
+            LetCommand("a".to_string(), Expression::IntExpression(10)),
+        );
         program.add_line(
             15,
-            LetCommand("b".to_string(), Expression::IntExpression(15)));
+            LetCommand("b".to_string(), Expression::IntExpression(15)),
+        );
         program.add_line(
             20,
             PrintCommand(vec![
-                    Expression::NumberVariableExpression("a".to_string()),
-                    Expression::NumberVariableExpression("b".to_string()),
-                ]));
+                Expression::NumberVariableExpression("a".to_string()),
+                Expression::NumberVariableExpression("b".to_string()),
+            ]),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit), Ok("10, 15\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("10 15\n".to_string())
+        );
     }
 
     #[test]
     fn rem() {
         let mut program = Program::new();
-        program.add_line(
-            10,
-            RemCommand(String::new()));
+        program.add_line(10, RemCommand(String::new()));
 
-        assert_eq!(program.run(LinesLimit::NoLimit), Ok(String::new()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok(String::new())
+        );
     }
 
     #[test]
     fn print_with_no_expressions() {
         let mut program = Program::new();
-        program.add_line(
-            10,
-            PrintCommand(vec![]));
+        program.add_line(10, PrintCommand(vec![]));
 
-        assert_eq!(program.run(LinesLimit::NoLimit), Ok("\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("\n".to_string())
+        );
     }
 
     // PRINT 90-32
@@ -256,11 +348,15 @@ mod tests {
         program.add_line(
             10,
             PrintCommand(vec![Expression::Subtract(
-                    Box::new(Expression::IntExpression(90)),
-                    Box::new(Expression::IntExpression(32)),
-                )]));
+                Box::new(Expression::IntExpression(90)),
+                Box::new(Expression::IntExpression(32)),
+            )]),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit), Ok("58\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("58\n".to_string())
+        );
     }
 
     // PRINT 58*5
@@ -270,11 +366,15 @@ mod tests {
         program.add_line(
             10,
             PrintCommand(vec![Expression::Multiply(
-                    Box::new(Expression::IntExpression(58)),
-                    Box::new(Expression::IntExpression(5)),
-                )]));
+                Box::new(Expression::IntExpression(58)),
+                Box::new(Expression::IntExpression(5)),
+            )]),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit), Ok("290\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("290\n".to_string())
+        );
     }
 
     // 10 PRINT (41-32)*5/9
@@ -283,19 +383,22 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            PrintCommand(
-                vec![Expression::Divide(
-                    Box::new(Expression::Multiply(
-                        Box::new(Expression::Subtract(
-                            Box::new(Expression::IntExpression(41)),
-                            Box::new(Expression::IntExpression(32)),
-                        )),
-                        Box::new(Expression::IntExpression(5)),
+            PrintCommand(vec![Expression::Divide(
+                Box::new(Expression::Multiply(
+                    Box::new(Expression::Subtract(
+                        Box::new(Expression::IntExpression(41)),
+                        Box::new(Expression::IntExpression(32)),
                     )),
-                    Box::new(Expression::IntExpression(9)),
-                )]));
+                    Box::new(Expression::IntExpression(5)),
+                )),
+                Box::new(Expression::IntExpression(9)),
+            )]),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit), Ok("5\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("5\n".to_string())
+        );
     }
 
     // 10 PRINT "Hello, World!"
@@ -305,13 +408,41 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            PrintCommand(vec![Expression::StringExpression("Hello, World!".to_string())])
+            PrintCommand(vec![Expression::StringExpression(
+                "Hello, World!".to_string(),
+            )]),
         );
         program.add_line(20, GotoCommand(10));
 
         assert_eq!(
-            program.run(LinesLimit::Limit(1)),
-            Ok("Hello, World!\nHello World\n".to_string())
+            program.run(LinesLimit::Limit(1), UserInputReader::RealStdin),
+            Ok("Hello, World!\nHello, World!\n".to_string())
+        );
+    }
+
+    // 10 INPUT "Enter deg F", F
+    // 20 PRINT "You gave ", F
+    #[test]
+    fn input() {
+        let mut program = Program::new();
+        program.add_line(
+            10,
+            InputCommand(vec![
+                Expression::StringExpression("Enter deg F".to_string()),
+                Expression::NumberVariableExpression("F".to_string()),
+            ]),
+        );
+        program.add_line(
+            20,
+            PrintCommand(vec![
+                Expression::StringExpression("You gave".to_string()),
+                Expression::NumberVariableExpression("F".to_string()),
+            ]),
+        );
+
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::FakeStdin("42.0".to_string())),
+            Ok("Enter deg F\nYou gave 42\n".to_string())
         );
     }
 
