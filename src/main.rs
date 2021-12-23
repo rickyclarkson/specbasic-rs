@@ -33,7 +33,7 @@ impl Expression {
     fn to_f64(&self, env: &Env) -> Result<f64, &str> {
         match self {
             Expression::Integer(value) => Ok(*value as f64),
-            Expression::Text(text) => {
+            Expression::Text(_text) => {
                 Err("Expected a number, found something else, but I can't figure out how to include that in the error")
             }
             Expression::NumberVariable(number_variable_name) =>
@@ -90,7 +90,7 @@ impl Env {
     fn new(user_input_reader: UserInputReader) -> Env {
         Env {
             number_variables: HashMap::new(),
-            user_input_reader: user_input_reader,
+            user_input_reader,
         }
     }
 
@@ -451,6 +451,45 @@ mod tests {
     // 40 INPUT "Enter deg F", F
     // 50 PRINT F,(F-32)*5/9
     // 60 GO TO 40
+    #[test]
+    fn goto_plus_input() {
+        let mut program = Program::new();
+        program.add_line(
+            10,
+            Rem(String::from("temperature conversion"))
+        );
+        program.add_line(
+            20,
+            Print(vec!(Expression::Text(String::from("deg F")), Expression::Text(String::from("deg C"))))
+        );
+        program.add_line(
+            30,
+            Print(vec!())
+        );
+        program.add_line(
+            40,
+            Input(vec!(Expression::Text(String::from("Enter deg F")), Expression::NumberVariable(String::from("F"))))
+        );
+        program.add_line(
+            50,
+            Print(vec!(Expression::NumberVariable("F".to_string()),
+                       Expression::Divide(
+                           Box::from(Expression::Multiply(
+                               Box::from(Expression::Subtract(Box::new(Expression::NumberVariable("F".to_string())), Box::new(Expression::Integer(32)))),
+                               Box::from(Expression::Integer(5))
+                           )),
+                           Box::new(Expression::Integer(9))))
+        ));
+        program.add_line(
+            60,
+            Goto(40)
+        );
+
+        assert_eq!(
+            program.run(LinesLimit::Limit(2), UserInputReader::FakeStdin("42.0".to_string())),
+            Ok("deg F deg C\n\nEnter deg F\n42 5.555555555555555\nEnter deg F\n42 5.555555555555555\nEnter deg F\n42 5.555555555555555\n".to_string())
+        );
+    }
 }
 
 fn main() {
