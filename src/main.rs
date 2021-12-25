@@ -12,7 +12,11 @@ enum Expression {
     Subtract(Box<Expression>, Box<Expression>),
     Multiply(Box<Expression>, Box<Expression>),
     Divide(Box<Expression>, Box<Expression>),
+    AreEqual(Box<Expression>, Box<Expression>),
+    LessThan(Box<Expression>, Box<Expression>),
+    GreaterThan(Box<Expression>, Box<Expression>),
 }
+
 impl Expression {
     fn to_string(&self, env: &Env) -> Result<String, &str> {
         match self {
@@ -27,6 +31,9 @@ impl Expression {
             Expression::Subtract(_, _) => self.to_f64(env).map(|v| v.to_string()),
             Expression::Multiply(_, _) => self.to_f64(env).map(|v| v.to_string()),
             Expression::Divide(_, _) => self.to_f64(env).map(|v| v.to_string()),
+            Expression::AreEqual(_, _) => self.to_string(env).map(|v| v.to_string()),
+            Expression::LessThan(_, _) => self.to_string(env).map(|v| v.to_string()),
+            Expression::GreaterThan(_, _) => self.to_string(env).map(|v| v.to_string()),
         }
     }
 
@@ -61,6 +68,45 @@ impl Expression {
                 (Ok(_), Err(e)) => Err(e),
                 (Err(e), _) => Err(e),
             },
+            Expression::AreEqual(_, _) => Err("AreEqual gives a bool, not an f64"),
+            Expression::LessThan(_, _) => Err("LessThan gives a bool, not an f64"),
+            Expression::GreaterThan(_, _) => Err("GreaterThan gives a bool, not an f64"),
+        }
+    }
+
+    fn to_bool(&self, env: &Env) -> Result<bool, String> {
+        match self {
+            Expression::Integer(value) => Err(value.to_string()),
+            Expression::Text(value) => Err(value.to_string()),
+            Expression::NumberVariable(value) => Err(value.to_string()),
+            Expression::Plus(_, _) => Err("Cannot convert the result of a plus operation to boolean".to_string()),
+            Expression::Subtract(_, _) =>
+                Err("Cannot convert the result of a subtract operation to boolean".to_string()),
+            Expression::Multiply(_, _) =>
+                Err("Cannot convert the result of a multiply operation to boolean".to_string()),
+            Expression::Divide(_, _) =>
+                Err("Cannot convert the result of a divide operation to boolean".to_string()),
+            Expression::AreEqual(left, right) =>
+                match (left.to_f64(env), right.to_f64(env)) {
+                    (Ok(l), Ok(r)) => Ok(l == r),
+                    (_, _) => match (left.to_string(env), right.to_string(env)) {
+                        (Ok(l), Ok(r)) => Ok(l == r),
+                        (_, Err(e)) => Err(e.to_string()),
+                        (Err(e), _) => Err(e.to_string()),
+                    },
+                },
+            Expression::LessThan(left, right) =>
+                match (left.to_f64(env), right.to_f64(env)) {
+                    (Ok(l), Ok(r)) => Ok(l < r),
+                    (_, Err(e)) => Err(e.to_string()),
+                    (Err(e), _) => Err(e.to_string()),
+                },
+            Expression::GreaterThan(left, right) =>
+                match (left.to_f64(env), right.to_f64(env)) {
+                    (Ok(l), Ok(r)) => Ok(l > r),
+                    (_, Err(e)) => Err(e.to_string()),
+                    (Err(e), _) => Err(e.to_string()),
+                }
         }
     }
 }
@@ -69,6 +115,7 @@ enum UserInputReader {
     RealStdin,
     FakeStdin(String),
 }
+
 impl UserInputReader {
     fn next(&self) -> String {
         match self {
@@ -76,7 +123,7 @@ impl UserInputReader {
                 let mut output = String::new();
                 stdin().read_line(&mut output).unwrap();
                 output
-            },
+            }
             UserInputReader::FakeStdin(input) => input.to_string(),
         }
     }
@@ -86,6 +133,7 @@ struct Env {
     number_variables: HashMap<String, f64>,
     user_input_reader: UserInputReader,
 }
+
 impl Env {
     fn new(user_input_reader: UserInputReader) -> Env {
         Env {
@@ -102,6 +150,7 @@ impl Env {
 enum CommandResult {
     Output(String),
     Jump(i32),
+    Stop(String),
 }
 
 #[derive(Clone)]
@@ -111,7 +160,10 @@ enum Command {
     Print(Vec<Expression>),
     Input(Vec<Expression>),
     Rem(String),
+    If(Expression, Vec<Command>),
+    Stop,
 }
+
 impl Command {
     fn run(&self, env: &mut Env) -> Result<CommandResult, String> {
         match self {
@@ -158,6 +210,26 @@ impl Command {
                 Ok(CommandResult::Output(output))
             }
             Command::Rem(_) => Ok(CommandResult::Output(String::new())),
+            Command::If(test, then) => match test.to_bool(env) {
+                Ok(false) => Ok(CommandResult::Output("".to_string())),
+                Ok(true) => {
+                    let mut output = String::new();
+                    for command in then {
+                        match &(command.run(env)) {
+                            Ok(CommandResult::Output(text)) => output.push_str(text),
+                            Ok(CommandResult::Jump(line_number)) => return Ok(CommandResult::Jump(*line_number)),
+                            Ok(CommandResult::Stop(text)) => {
+                                output.push_str(text);
+                                return Ok(CommandResult::Stop(output));
+                            },
+                            Err(msg) => return Err(msg.to_string()),
+                        }
+                    }
+                    Ok(CommandResult::Output(output))
+                }
+                Err(e) => Err(e),
+            },
+            Command::Stop => Ok(CommandResult::Stop("".to_string())),
         }
     }
 }
@@ -166,6 +238,7 @@ enum LinesLimit {
     NoLimit,
     Limit(i32),
 }
+
 impl LinesLimit {
     fn decrement(&self) -> LinesLimit {
         match self {
@@ -179,6 +252,7 @@ impl LinesLimit {
 struct Program {
     lines: BTreeMap<i32, Command>,
 }
+
 impl Program {
     fn new() -> Program {
         Program {
@@ -238,6 +312,10 @@ impl Program {
                         child_lines.clone(),
                     );
                 }
+                Ok(CommandResult::Stop(text)) => {
+                    output.push_str(text);
+                    return Ok(output.to_string())
+                },
                 Err(msg) => return Err(msg.to_string()),
             }
         }
@@ -263,7 +341,7 @@ mod tests {
         );
         let output = program.run(
             LinesLimit::NoLimit,
-            UserInputReader::RealStdin
+            UserInputReader::RealStdin,
         );
         assert_eq!(output, Ok("10\n".to_string()));
     }
@@ -456,19 +534,19 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            Rem(String::from("temperature conversion"))
+            Rem(String::from("temperature conversion")),
         );
         program.add_line(
             20,
-            Print(vec!(Expression::Text(String::from("deg F")), Expression::Text(String::from("deg C"))))
+            Print(vec!(Expression::Text(String::from("deg F")), Expression::Text(String::from("deg C")))),
         );
         program.add_line(
             30,
-            Print(vec!())
+            Print(vec!()),
         );
         program.add_line(
             40,
-            Input(vec!(Expression::Text(String::from("Enter deg F")), Expression::NumberVariable(String::from("F"))))
+            Input(vec!(Expression::Text(String::from("Enter deg F")), Expression::NumberVariable(String::from("F")))),
         );
         program.add_line(
             50,
@@ -476,19 +554,139 @@ mod tests {
                        Expression::Divide(
                            Box::from(Expression::Multiply(
                                Box::from(Expression::Subtract(Box::new(Expression::NumberVariable("F".to_string())), Box::new(Expression::Integer(32)))),
-                               Box::from(Expression::Integer(5))
+                               Box::from(Expression::Integer(5)),
                            )),
                            Box::new(Expression::Integer(9))))
-        ));
+            ));
         program.add_line(
             60,
-            Goto(40)
+            Goto(40),
         );
 
         assert_eq!(
             program.run(LinesLimit::Limit(2), UserInputReader::FakeStdin("42.0".to_string())),
             Ok("deg F deg C\n\nEnter deg F\n42 5.555555555555555\nEnter deg F\n42 5.555555555555555\nEnter deg F\n42 5.555555555555555\n".to_string())
         );
+    }
+
+    // 26 INPUT a
+    // 27 CLS
+    // 30 INPUT “Guess the number”, b
+    // 40 IF b=a THEN PRINT “That is correct”:,STOP
+    // 56 IF b<a THEN PRINT “That is too small, try again”
+    // 66 IF b>a THEN PRINT “That is too big, try again”
+    // 70 GO TO 36
+    #[test]
+    fn guess_number() {
+        let mut program = Program::new();
+        program.add_line(
+            26,
+            Input(vec!(Expression::NumberVariable("a".to_string()))),
+        );
+        program.add_line(
+            30,
+            Input(vec!(Expression::Text("Guess the number".to_string()), Expression::NumberVariable("b".to_string()))),
+        );
+        program.add_line(
+            40,
+            If(
+                Expression::AreEqual(
+                    Box::new(Expression::NumberVariable("b".to_string())),
+                    Box::new(Expression::NumberVariable("a".to_string())),
+                ),
+                vec!(
+                    Print(vec!(Expression::Text("That is correct".to_string()))),
+                    Stop
+                ),
+            ),
+        );
+        program.add_line(
+            56,
+            If(
+                Expression::LessThan(
+                    Box::new(Expression::NumberVariable("b".to_string())),
+                    Box::new(Expression::NumberVariable("a".to_string())),
+                ),
+                vec!(Print(vec!(Expression::Text("That is too small, try again".to_string())))),
+            ),
+        );
+        program.add_line(
+            66,
+            If(
+                Expression::GreaterThan(
+                    Box::new(Expression::NumberVariable("b".to_string())),
+                    Box::new(Expression::NumberVariable("a".to_string())),
+                ),
+                vec!(Print(vec!(Expression::Text("That is too big, try again".to_string())))),
+            ),
+        );
+        program.add_line(
+            70,
+            Goto(36),
+        );
+
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::FakeStdin("42.0".to_string())),
+            Ok("Guess the number\nThat is correct\n".to_string())
+        );
+    }
+
+    // 5 PRINT "Expected"
+    // 10 IF 4 > 3 THEN STOP
+    // 20 PRINT "Failed to stop"
+    #[test]
+    fn stop() {
+        let mut program = Program::new();
+        program.add_line(
+            5,
+            Print(vec!(Expression::Text("Expected".to_string())))
+        );
+        program.add_line(
+            10,
+            If(
+                Expression::GreaterThan(
+                Box::from(Expression::Integer(4)),
+                Box::from(Expression::Integer(3))
+            ),
+                vec!(Stop)
+        ));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+        Ok("Expected\n".to_string()));
+    }
+
+    // 10 IF 4 > 3 THEN PRINT "Foo": PRINT "Bar"
+    #[test]
+    fn if_with_two_commands() {
+        let mut program = Program::new();
+        program.add_line(
+            10,
+            If(Expression::GreaterThan(
+                Box::from(Expression::Integer(4)),
+                Box::from(Expression::Integer(3))),
+            vec!(Print(vec!(Expression::Text("Foo".to_string()))), Print(vec!(Expression::Text("Bar".to_string()))))
+            ));
+
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("Foo\nBar\n".to_string())
+        );
+    }
+
+    // 10 IF 4 > 3 THEN PRINT "Foo": STOP
+    #[test]
+    fn if_with_print_and_stop() {
+        let mut program = Program::new();
+        program.add_line(
+            10,
+            If(Expression::GreaterThan(
+                Box::from(Expression::Integer(4)),
+                Box::from(Expression::Integer(3))),
+                vec!(
+                    Print(vec!(Expression::Text("Foo".to_string()))),
+                    Stop
+                )
+            ));
     }
 }
 
