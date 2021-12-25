@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::stdin;
+use std::ops;
 use std::result::Result;
 use std::vec::Vec;
 
@@ -17,7 +18,54 @@ enum Expression {
     GreaterThan(Box<Expression>, Box<Expression>),
 }
 
+impl ops::Add for Expression {
+    type Output = Expression;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Expression::Plus(Box::from(self), Box::from(rhs))
+    }
+}
+
+impl ops::Sub for Expression {
+    type Output = Expression;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Expression::Subtract(Box::from(self), Box::from(rhs))
+    }
+}
+
+impl ops::Mul for Expression {
+    type Output = Expression;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Expression::Multiply(Box::from(self), Box::from(rhs))
+    }
+}
+
+impl ops::Div for Expression {
+    type Output = Expression;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Expression::Divide(Box::from(self), Box::from(rhs))
+    }
+}
+
 impl Expression {
+    fn text(value: &str) -> Expression {
+        Expression::Text(value.to_string())
+    }
+    fn number_variable(name: &str) -> Expression {
+        Expression::NumberVariable(name.to_string())
+    }
+    fn greater_than(self, other: Expression) -> Expression {
+        Expression::GreaterThan(Box::from(self), Box::from(other))
+    }
+    fn are_equal(self, other: Expression) -> Expression {
+        Expression::AreEqual(Box::from(self), Box::from(other))
+    }
+    fn less_than(self, other: Expression) -> Expression {
+        Expression::LessThan(Box::from(self), Box::from(other))
+    }
     fn to_string(&self, env: &Env) -> Result<String, &str> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -79,34 +127,36 @@ impl Expression {
             Expression::Integer(value) => Err(value.to_string()),
             Expression::Text(value) => Err(value.to_string()),
             Expression::NumberVariable(value) => Err(value.to_string()),
-            Expression::Plus(_, _) => Err("Cannot convert the result of a plus operation to boolean".to_string()),
-            Expression::Subtract(_, _) =>
-                Err("Cannot convert the result of a subtract operation to boolean".to_string()),
-            Expression::Multiply(_, _) =>
-                Err("Cannot convert the result of a multiply operation to boolean".to_string()),
-            Expression::Divide(_, _) =>
-                Err("Cannot convert the result of a divide operation to boolean".to_string()),
-            Expression::AreEqual(left, right) =>
-                match (left.to_f64(env), right.to_f64(env)) {
+            Expression::Plus(_, _) => {
+                Err("Cannot convert the result of a plus operation to boolean".to_string())
+            }
+            Expression::Subtract(_, _) => {
+                Err("Cannot convert the result of a subtract operation to boolean".to_string())
+            }
+            Expression::Multiply(_, _) => {
+                Err("Cannot convert the result of a multiply operation to boolean".to_string())
+            }
+            Expression::Divide(_, _) => {
+                Err("Cannot convert the result of a divide operation to boolean".to_string())
+            }
+            Expression::AreEqual(left, right) => match (left.to_f64(env), right.to_f64(env)) {
+                (Ok(l), Ok(r)) => Ok(l == r),
+                (_, _) => match (left.to_string(env), right.to_string(env)) {
                     (Ok(l), Ok(r)) => Ok(l == r),
-                    (_, _) => match (left.to_string(env), right.to_string(env)) {
-                        (Ok(l), Ok(r)) => Ok(l == r),
-                        (_, Err(e)) => Err(e.to_string()),
-                        (Err(e), _) => Err(e.to_string()),
-                    },
-                },
-            Expression::LessThan(left, right) =>
-                match (left.to_f64(env), right.to_f64(env)) {
-                    (Ok(l), Ok(r)) => Ok(l < r),
                     (_, Err(e)) => Err(e.to_string()),
                     (Err(e), _) => Err(e.to_string()),
                 },
-            Expression::GreaterThan(left, right) =>
-                match (left.to_f64(env), right.to_f64(env)) {
-                    (Ok(l), Ok(r)) => Ok(l > r),
-                    (_, Err(e)) => Err(e.to_string()),
-                    (Err(e), _) => Err(e.to_string()),
-                }
+            },
+            Expression::LessThan(left, right) => match (left.to_f64(env), right.to_f64(env)) {
+                (Ok(l), Ok(r)) => Ok(l < r),
+                (_, Err(e)) => Err(e.to_string()),
+                (Err(e), _) => Err(e.to_string()),
+            },
+            Expression::GreaterThan(left, right) => match (left.to_f64(env), right.to_f64(env)) {
+                (Ok(l), Ok(r)) => Ok(l > r),
+                (_, Err(e)) => Err(e.to_string()),
+                (Err(e), _) => Err(e.to_string()),
+            },
         }
     }
 }
@@ -217,11 +267,13 @@ impl Command {
                     for command in then {
                         match &(command.run(env)) {
                             Ok(CommandResult::Output(text)) => output.push_str(text),
-                            Ok(CommandResult::Jump(line_number)) => return Ok(CommandResult::Jump(*line_number)),
+                            Ok(CommandResult::Jump(line_number)) => {
+                                return Ok(CommandResult::Jump(*line_number))
+                            }
                             Ok(CommandResult::Stop(text)) => {
                                 output.push_str(text);
                                 return Ok(CommandResult::Stop(output));
-                            },
+                            }
                             Err(msg) => return Err(msg.to_string()),
                         }
                     }
@@ -273,12 +325,7 @@ impl Program {
         let mut output = String::new();
         let mut env = Env::new(user_input_reader);
 
-        self.run_helper(
-            lines_limit,
-            &mut output,
-            &mut env,
-            self.lines.clone(),
-        )
+        self.run_helper(lines_limit, &mut output, &mut env, self.lines.clone())
     }
 
     fn run_helper(
@@ -314,8 +361,8 @@ impl Program {
                 }
                 Ok(CommandResult::Stop(text)) => {
                     output.push_str(text);
-                    return Ok(output.to_string())
-                },
+                    return Ok(output.to_string());
+                }
                 Err(msg) => return Err(msg.to_string()),
             }
         }
@@ -331,39 +378,19 @@ mod tests {
     #[test]
     fn let_and_print() {
         let mut program = Program::new();
-        program.add_line(
-            20,
-            Print(vec![Expression::NumberVariable("a".to_string())]),
-        );
-        program.add_line(
-            10,
-            Let("a".to_string(), Expression::Integer(10)),
-        );
-        let output = program.run(
-            LinesLimit::NoLimit,
-            UserInputReader::RealStdin,
-        );
+        program.add_line(20, Print(vec![Expression::number_variable("a")]));
+        program.add_line(10, Let("a".to_string(), Expression::Integer(10)));
+        let output = program.run(LinesLimit::NoLimit, UserInputReader::RealStdin);
         assert_eq!(output, Ok("10\n".to_string()));
     }
 
     #[test]
     fn print_adding_vars() {
         let mut program = Program::new();
-        program.add_line(
-            20,
-            Print(vec![Expression::Plus(
-                Box::new(Expression::NumberVariable("a".to_string())),
-                Box::new(Expression::NumberVariable("b".to_string())),
-            )]),
-        );
-        program.add_line(
-            10,
-            Let("a".to_string(), Expression::Integer(10)),
-        );
-        program.add_line(
-            15,
-            Let("b".to_string(), Expression::Integer(15)),
-        );
+        let number_variable = Expression::number_variable;
+        program.add_line(20, Print(vec![number_variable("a") + number_variable("b")]));
+        program.add_line(10, Let("a".to_string(), Expression::Integer(10)));
+        program.add_line(15, Let("b".to_string(), Expression::Integer(15)));
 
         assert_eq!(
             program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
@@ -374,19 +401,13 @@ mod tests {
     #[test]
     fn print_with_comma() {
         let mut program = Program::new();
-        program.add_line(
-            10,
-            Let("a".to_string(), Expression::Integer(10)),
-        );
-        program.add_line(
-            15,
-            Let("b".to_string(), Expression::Integer(15)),
-        );
+        program.add_line(10, Let("a".to_string(), Expression::Integer(10)));
+        program.add_line(15, Let("b".to_string(), Expression::Integer(15)));
         program.add_line(
             20,
             Print(vec![
-                Expression::NumberVariable("a".to_string()),
-                Expression::NumberVariable("b".to_string()),
+                Expression::number_variable("a"),
+                Expression::number_variable("b"),
             ]),
         );
 
@@ -424,10 +445,7 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            Print(vec![Expression::Subtract(
-                Box::new(Expression::Integer(90)),
-                Box::new(Expression::Integer(32)),
-            )]),
+            Print(vec![Expression::Integer(90) - Expression::Integer(32)]),
         );
 
         assert_eq!(
@@ -442,10 +460,7 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            Print(vec![Expression::Multiply(
-                Box::new(Expression::Integer(58)),
-                Box::new(Expression::Integer(5)),
-            )]),
+            Print(vec![Expression::Integer(58) * Expression::Integer(5)]),
         );
 
         assert_eq!(
@@ -460,16 +475,10 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            Print(vec![Expression::Divide(
-                Box::new(Expression::Multiply(
-                    Box::new(Expression::Subtract(
-                        Box::new(Expression::Integer(41)),
-                        Box::new(Expression::Integer(32)),
-                    )),
-                    Box::new(Expression::Integer(5)),
-                )),
-                Box::new(Expression::Integer(9)),
-            )]),
+            Print(vec![
+                (Expression::Integer(41) - Expression::Integer(32)) * Expression::Integer(5)
+                    / Expression::Integer(9),
+            ]),
         );
 
         assert_eq!(
@@ -483,12 +492,7 @@ mod tests {
     #[test]
     fn goto() {
         let mut program = Program::new();
-        program.add_line(
-            10,
-            Print(vec![Expression::Text(
-                "Hello, World!".to_string(),
-            )]),
-        );
+        program.add_line(10, Print(vec![Expression::text("Hello, World!")]));
         program.add_line(20, Goto(10));
 
         assert_eq!(
@@ -505,20 +509,23 @@ mod tests {
         program.add_line(
             10,
             Input(vec![
-                Expression::Text("Enter deg F".to_string()),
-                Expression::NumberVariable("F".to_string()),
+                Expression::text("Enter deg F"),
+                Expression::number_variable("F"),
             ]),
         );
         program.add_line(
             20,
             Print(vec![
-                Expression::Text("You gave".to_string()),
-                Expression::NumberVariable("F".to_string()),
+                Expression::text("You gave"),
+                Expression::number_variable("F"),
             ]),
         );
 
         assert_eq!(
-            program.run(LinesLimit::NoLimit, UserInputReader::FakeStdin("42.0".to_string())),
+            program.run(
+                LinesLimit::NoLimit,
+                UserInputReader::FakeStdin("42.0".to_string())
+            ),
             Ok("Enter deg F\nYou gave 42\n".to_string())
         );
     }
@@ -532,36 +539,29 @@ mod tests {
     #[test]
     fn goto_plus_input() {
         let mut program = Program::new();
-        program.add_line(
-            10,
-            Rem(String::from("temperature conversion")),
-        );
+        program.add_line(10, Rem(String::from("temperature conversion")));
         program.add_line(
             20,
-            Print(vec!(Expression::Text(String::from("deg F")), Expression::Text(String::from("deg C")))),
+            Print(vec![Expression::text("deg F"), Expression::text("deg C")]),
         );
-        program.add_line(
-            30,
-            Print(vec!()),
-        );
+        program.add_line(30, Print(vec![]));
         program.add_line(
             40,
-            Input(vec!(Expression::Text(String::from("Enter deg F")), Expression::NumberVariable(String::from("F")))),
+            Input(vec![
+                Expression::text("Enter deg F"),
+                Expression::number_variable("F"),
+            ]),
         );
         program.add_line(
             50,
-            Print(vec!(Expression::NumberVariable("F".to_string()),
-                       Expression::Divide(
-                           Box::from(Expression::Multiply(
-                               Box::from(Expression::Subtract(Box::new(Expression::NumberVariable("F".to_string())), Box::new(Expression::Integer(32)))),
-                               Box::from(Expression::Integer(5)),
-                           )),
-                           Box::new(Expression::Integer(9))))
-            ));
-        program.add_line(
-            60,
-            Goto(40),
+            Print(vec![
+                Expression::number_variable("F"),
+                (Expression::number_variable("F") - Expression::Integer(32))
+                    * Expression::Integer(5)
+                    / Expression::Integer(9),
+            ]),
         );
+        program.add_line(60, Goto(40));
 
         assert_eq!(
             program.run(LinesLimit::Limit(2), UserInputReader::FakeStdin("42.0".to_string())),
@@ -579,54 +579,44 @@ mod tests {
     #[test]
     fn guess_number() {
         let mut program = Program::new();
-        program.add_line(
-            26,
-            Input(vec!(Expression::NumberVariable("a".to_string()))),
-        );
+        program.add_line(26, Input(vec![Expression::number_variable("a")]));
         program.add_line(
             30,
-            Input(vec!(Expression::Text("Guess the number".to_string()), Expression::NumberVariable("b".to_string()))),
+            Input(vec![
+                Expression::text("Guess the number"),
+                Expression::number_variable("b"),
+            ]),
         );
         program.add_line(
             40,
             If(
-                Expression::AreEqual(
-                    Box::new(Expression::NumberVariable("b".to_string())),
-                    Box::new(Expression::NumberVariable("a".to_string())),
-                ),
-                vec!(
-                    Print(vec!(Expression::Text("That is correct".to_string()))),
-                    Stop
-                ),
+                Expression::number_variable("b").are_equal(Expression::number_variable("a")),
+                vec![Print(vec![Expression::text("That is correct")]), Stop],
             ),
         );
         program.add_line(
             56,
             If(
-                Expression::LessThan(
-                    Box::new(Expression::NumberVariable("b".to_string())),
-                    Box::new(Expression::NumberVariable("a".to_string())),
-                ),
-                vec!(Print(vec!(Expression::Text("That is too small, try again".to_string())))),
+                Expression::number_variable("b").less_than(Expression::number_variable("a")),
+                vec![Print(vec![Expression::text(
+                    "That is too small, try again",
+                )])],
             ),
         );
         program.add_line(
             66,
             If(
-                Expression::GreaterThan(
-                    Box::new(Expression::NumberVariable("b".to_string())),
-                    Box::new(Expression::NumberVariable("a".to_string())),
-                ),
-                vec!(Print(vec!(Expression::Text("That is too big, try again".to_string())))),
+                Expression::number_variable("b").greater_than(Expression::number_variable("a")),
+                vec![Print(vec![Expression::text("That is too big, try again")])],
             ),
         );
-        program.add_line(
-            70,
-            Goto(36),
-        );
+        program.add_line(70, Goto(36));
 
         assert_eq!(
-            program.run(LinesLimit::NoLimit, UserInputReader::FakeStdin("42.0".to_string())),
+            program.run(
+                LinesLimit::NoLimit,
+                UserInputReader::FakeStdin("42.0".to_string())
+            ),
             Ok("Guess the number\nThat is correct\n".to_string())
         );
     }
@@ -637,22 +627,19 @@ mod tests {
     #[test]
     fn stop() {
         let mut program = Program::new();
-        program.add_line(
-            5,
-            Print(vec!(Expression::Text("Expected".to_string())))
-        );
+        program.add_line(5, Print(vec![Expression::text("Expected")]));
         program.add_line(
             10,
             If(
-                Expression::GreaterThan(
-                Box::from(Expression::Integer(4)),
-                Box::from(Expression::Integer(3))
+                Expression::Integer(4).greater_than(Expression::Integer(3)),
+                vec![Stop],
             ),
-                vec!(Stop)
-        ));
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
-        Ok("Expected\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("Expected\n".to_string())
+        );
     }
 
     // 10 IF 4 > 3 THEN PRINT "Foo": PRINT "Bar"
@@ -661,11 +648,14 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            If(Expression::GreaterThan(
-                Box::from(Expression::Integer(4)),
-                Box::from(Expression::Integer(3))),
-            vec!(Print(vec!(Expression::Text("Foo".to_string()))), Print(vec!(Expression::Text("Bar".to_string()))))
-            ));
+            If(
+                Expression::Integer(4).greater_than(Expression::Integer(3)),
+                vec![
+                    Print(vec![Expression::text("Foo")]),
+                    Print(vec![Expression::text("Bar")]),
+                ],
+            ),
+        );
 
         assert_eq!(
             program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
@@ -679,14 +669,11 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            If(Expression::GreaterThan(
-                Box::from(Expression::Integer(4)),
-                Box::from(Expression::Integer(3))),
-                vec!(
-                    Print(vec!(Expression::Text("Foo".to_string()))),
-                    Stop
-                )
-            ));
+            If(
+                Expression::Integer(4).greater_than(Expression::Integer(3)),
+                vec![Print(vec![Expression::text("Foo")]), Stop],
+            ),
+        );
     }
 }
 
