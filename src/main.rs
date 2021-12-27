@@ -67,7 +67,7 @@ impl Expression {
     fn less_than(self, other: Expression) -> Expression {
         Expression::LessThan(Box::from(self), Box::from(other))
     }
-    fn to_string(&self, env: &Env) -> Result<String, &str> {
+    fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
             Expression::Text(text) => Ok(text.to_string()),
@@ -86,16 +86,18 @@ impl Expression {
         }
     }
 
-    fn to_f64(&self, env: &Env) -> Result<f64, &str> {
+    fn to_f64(&self, env: &Env) -> Result<f64, String> {
         match self {
             Expression::Integer(value) => Ok(*value as f64),
             Expression::Text(_text) => {
-                Err("Expected a number, found something else, but I can't figure out how to include that in the error")
+                Err("Expected a number, found something else, but I can't figure out how to include that in the error".to_string())
             }
             Expression::NumberVariable(number_variable_name) =>
                 match env.number_variables.get(number_variable_name) {
                     Some(value) => Ok(*value),
-                    None => Err("No such variable found, not sure how to say which.")
+                    None => {
+                        Err(format!("No variable {} found.", number_variable_name))
+                    },
                 },
             Expression::Plus(left, right) => match (left.to_f64(env), right.to_f64(env)) {
                 (Ok(l), Ok(r)) => Ok(l + r),
@@ -117,9 +119,9 @@ impl Expression {
                 (Ok(_), Err(e)) => Err(e),
                 (Err(e), _) => Err(e),
             },
-            Expression::AreEqual(_, _) => Err("AreEqual gives a bool, not an f64"),
-            Expression::LessThan(_, _) => Err("LessThan gives a bool, not an f64"),
-            Expression::GreaterThan(_, _) => Err("GreaterThan gives a bool, not an f64"),
+            Expression::AreEqual(_, _) => Err("AreEqual gives a bool, not an f64".to_string()),
+            Expression::LessThan(_, _) => Err("LessThan gives a bool, not an f64".to_string()),
+            Expression::GreaterThan(_, _) => Err("GreaterThan gives a bool, not an f64".to_string()),
         }
     }
 
@@ -222,6 +224,9 @@ enum Command {
 }
 
 impl Command {
+    fn let_equal(name: &str, value: Expression) -> Command {
+        Command::Let(name.to_string(), value)
+    }
     fn for_loop(
         variable_name: &str,
         begin: Expression,
@@ -772,6 +777,59 @@ mod tests {
         assert_eq!(
             program.run(LinesLimit::Limit(100), RealStdin),
             Ok("10\n9\n8\n7\n6\n5\n4\n3\n2\n1\n".to_string())
+        );
+    }
+
+    // 5 LET n = 0
+    // 10 FOR a = 1 TO 2
+    // 20 FOR b = 2 TO 3
+    // 30 LET c = a*b
+    // 40 IF c>n THEN LET n = c
+    // 50 NEXT b
+    // 60 NEXT a
+    // 70 PRINT n
+    #[test]
+    fn nested_for() {
+        let mut program = Program::new();
+        program.add_line(5, Command::let_equal("n", Expression::Integer(0)));
+        program.add_line(
+            10,
+            Command::for_loop(
+                "a",
+                Expression::Integer(1),
+                Expression::Integer(2),
+                Expression::Integer(1),
+            ),
+        );
+        program.add_line(
+            20,
+            Command::for_loop(
+                "b",
+                Expression::Integer(2),
+                Expression::Integer(3),
+                Expression::Integer(1),
+            ),
+        );
+        program.add_line(
+            30,
+            Command::let_equal(
+                "c",
+                Expression::number_variable("a") * Expression::number_variable("b"),
+            ),
+        );
+        program.add_line(
+            40,
+            If(
+                Expression::number_variable("c").greater_than(Expression::number_variable("n")),
+                vec![Command::let_equal("n", Expression::number_variable("c"))],
+            ),
+        );
+        program.add_line(50, Command::next("b"));
+        program.add_line(60, Command::next("a"));
+        program.add_line(70, Print(vec![Expression::number_variable("n")]));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("6\n".to_string())
         );
     }
 }
