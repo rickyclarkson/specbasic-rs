@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::io::stdin;
 use std::ops;
@@ -182,6 +183,8 @@ impl UserInputReader {
 struct Env {
     number_variables: HashMap<String, f64>,
     user_input_reader: UserInputReader,
+    loop_line_numbers: HashMap<String, i32>,
+    current_line_number: i32,
 }
 
 impl Env {
@@ -189,6 +192,8 @@ impl Env {
         Env {
             number_variables: HashMap::new(),
             user_input_reader,
+            loop_line_numbers: HashMap::new(),
+            current_line_number: 0,
         }
     }
 
@@ -212,9 +217,17 @@ enum Command {
     Rem(String),
     If(Expression, Vec<Command>),
     Stop,
+    For(String, Expression, Expression),
+    Next(String),
 }
 
 impl Command {
+    fn for_loop(variable_name: &str, begin: Expression, end: Expression) -> Command {
+        Command::For(variable_name.to_string(), begin, end)
+    }
+    fn next(variable_name: &str) -> Command {
+        Command::Next(variable_name.to_string())
+    }
     fn run(&self, env: &mut Env) -> Result<CommandResult, String> {
         match self {
             Command::Let(variable_name, value) => match value.to_f64(env) {
@@ -282,6 +295,35 @@ impl Command {
                 Err(e) => Err(e),
             },
             Command::Stop => Ok(CommandResult::Stop("".to_string())),
+            Command::For(variable_name, begin, end) => {
+                let begin = begin.to_f64(env);
+                let end = end.to_f64(env);
+                match (
+                    env.number_variables.entry(variable_name.to_string()),
+                    begin,
+                    end,
+                ) {
+                    (_, Err(e), _) => Err(e.to_string()),
+                    (_, _, Err(e)) => Err(e.to_string()),
+                    (Entry::Vacant(v), Ok(b), _) => {
+                        v.insert(b);
+                        env.loop_line_numbers
+                            .insert(variable_name.to_string(), env.current_line_number);
+                        Ok(CommandResult::Output("".to_string()))
+                    }
+                    (Entry::Occupied(mut o), Ok(_), Ok(e)) => {
+                        o.insert(o.get() + 1.0);
+                        if *o.get() == e {
+                            env.loop_line_numbers.remove(variable_name.as_str());
+                        }
+                        Ok(CommandResult::Output("".to_string()))
+                    }
+                }
+            }
+            Command::Next(variable_name) => match env.loop_line_numbers.get(variable_name) {
+                None => Ok(CommandResult::Output("".to_string())),
+                Some(line_number) => Ok(CommandResult::Jump(*line_number)),
+            },
         }
     }
 }
@@ -372,6 +414,7 @@ impl Program {
 
 #[cfg(test)]
 mod tests {
+    use crate::UserInputReader::RealStdin;
     use crate::*;
     use Command::*;
 
@@ -673,6 +716,25 @@ mod tests {
                 Expression::Integer(4).greater_than(Expression::Integer(3)),
                 vec![Print(vec![Expression::text("Foo")]), Stop],
             ),
+        );
+    }
+
+    // 10 FOR n=1 TO 10
+    // 20 PRINT n
+    // 30 NEXT n"
+    #[test]
+    fn test_for_loop() {
+        let mut program = Program::new();
+        program.add_line(
+            10,
+            Command::for_loop("n", Expression::Integer(1), Expression::Integer(10)),
+        );
+        program.add_line(20, Print(vec![Expression::number_variable("n")]));
+        program.add_line(30, Command::next("n"));
+
+        assert_eq!(
+            program.run(LinesLimit::Limit(100), RealStdin),
+            Ok("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n".to_string())
         );
     }
 }
