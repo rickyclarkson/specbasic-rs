@@ -217,13 +217,18 @@ enum Command {
     Rem(String),
     If(Expression, Vec<Command>),
     Stop,
-    For(String, Expression, Expression),
+    For(String, Expression, Expression, Expression),
     Next(String),
 }
 
 impl Command {
-    fn for_loop(variable_name: &str, begin: Expression, end: Expression) -> Command {
-        Command::For(variable_name.to_string(), begin, end)
+    fn for_loop(
+        variable_name: &str,
+        begin: Expression,
+        end: Expression,
+        step: Expression,
+    ) -> Command {
+        Command::For(variable_name.to_string(), begin, end, step)
     }
     fn next(variable_name: &str) -> Command {
         Command::Next(variable_name.to_string())
@@ -295,24 +300,27 @@ impl Command {
                 Err(e) => Err(e),
             },
             Command::Stop => Ok(CommandResult::Stop("".to_string())),
-            Command::For(variable_name, begin, end) => {
+            Command::For(variable_name, begin, end, step) => {
                 let begin = begin.to_f64(env);
                 let end = end.to_f64(env);
+                let step = step.to_f64(env);
                 match (
                     env.number_variables.entry(variable_name.to_string()),
                     begin,
                     end,
+                    step,
                 ) {
-                    (_, Err(e), _) => Err(e.to_string()),
-                    (_, _, Err(e)) => Err(e.to_string()),
-                    (Entry::Vacant(v), Ok(b), _) => {
+                    (_, Err(e), _, _) => Err(e.to_string()),
+                    (_, _, Err(e), _) => Err(e.to_string()),
+                    (_, _, _, Err(e)) => Err(e.to_string()),
+                    (Entry::Vacant(v), Ok(b), _, _) => {
                         v.insert(b);
                         env.loop_line_numbers
                             .insert(variable_name.to_string(), env.current_line_number);
                         Ok(CommandResult::Output("".to_string()))
                     }
-                    (Entry::Occupied(mut o), Ok(_), Ok(e)) => {
-                        o.insert(o.get() + 1.0);
+                    (Entry::Occupied(mut o), Ok(_), Ok(e), Ok(s)) => {
+                        o.insert(o.get() + s);
                         if *o.get() == e {
                             env.loop_line_numbers.remove(variable_name.as_str());
                         }
@@ -727,7 +735,12 @@ mod tests {
         let mut program = Program::new();
         program.add_line(
             10,
-            Command::for_loop("n", Expression::Integer(1), Expression::Integer(10)),
+            Command::for_loop(
+                "n",
+                Expression::Integer(1),
+                Expression::Integer(10),
+                Expression::Integer(1),
+            ),
         );
         program.add_line(20, Print(vec![Expression::number_variable("n")]));
         program.add_line(30, Command::next("n"));
@@ -735,6 +748,30 @@ mod tests {
         assert_eq!(
             program.run(LinesLimit::Limit(100), RealStdin),
             Ok("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n".to_string())
+        );
+    }
+
+    // 10 FOR n=10 TO 1 STEP -1
+    // 20 PRINT n
+    // 30 NEXT n
+    #[test]
+    fn for_with_step() {
+        let mut program = Program::new();
+        program.add_line(
+            10,
+            Command::for_loop(
+                "n",
+                Expression::Integer(10),
+                Expression::Integer(1),
+                Expression::Integer(-1),
+            ),
+        );
+        program.add_line(20, Print(vec![Expression::number_variable("n")]));
+        program.add_line(30, Command::next("n"));
+
+        assert_eq!(
+            program.run(LinesLimit::Limit(100), RealStdin),
+            Ok("10\n9\n8\n7\n6\n5\n4\n3\n2\n1\n".to_string())
         );
     }
 }
