@@ -1,15 +1,19 @@
+use crate::UserInputReader::FakeStdins;
+use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::Bound::Unbounded;
+use std::collections::HashMap;
 use std::ops;
+use std::ops::Bound::{Excluded, Included};
 use std::result::Result;
 use std::vec::Vec;
-use crate::UserInputReader::FakeStdins;
 
 #[derive(Clone)]
 enum Expression {
     Integer(i32),
     Text(String),
     NumberVariable(String),
+    StringVariable(String),
     Plus(Box<Expression>, Box<Expression>),
     Subtract(Box<Expression>, Box<Expression>),
     Multiply(Box<Expression>, Box<Expression>),
@@ -58,6 +62,9 @@ impl Expression {
     fn number_variable(name: &str) -> Expression {
         Expression::NumberVariable(name.to_string())
     }
+    fn string_variable(name: &str) -> Expression {
+        Expression::StringVariable(name.to_string())
+    }
     fn greater_than(&self, other: &Expression) -> Expression {
         Expression::GreaterThan(Box::from(self.clone()), Box::from(other.clone()))
     }
@@ -74,6 +81,11 @@ impl Expression {
             Expression::NumberVariable(number_variable_name) => Ok(env
                 .number_variables
                 .get(number_variable_name)
+                .unwrap()
+                .to_string()),
+            Expression::StringVariable(string_variable_bname) => Ok(env
+                .string_variables
+                .get(string_variable_bname)
                 .unwrap()
                 .to_string()),
             Expression::Plus(_, _) => self.to_f64(env).map(|v| v.to_string()),
@@ -122,6 +134,7 @@ impl Expression {
             Expression::AreEqual(_, _) => Err("AreEqual gives a bool, not an f64".to_string()),
             Expression::LessThan(_, _) => Err("LessThan gives a bool, not an f64".to_string()),
             Expression::GreaterThan(_, _) => Err("GreaterThan gives a bool, not an f64".to_string()),
+            Expression::StringVariable(_) => Err("String variables hold a string, not an f64".to_string()),
         }
     }
 
@@ -130,6 +143,7 @@ impl Expression {
             Expression::Integer(value) => Err(value.to_string()),
             Expression::Text(value) => Err(value.to_string()),
             Expression::NumberVariable(value) => Err(value.to_string()),
+            Expression::StringVariable(value) => Err(value.to_string()),
             Expression::Plus(_, _) => {
                 Err("Cannot convert the result of a plus operation to boolean".to_string())
             }
@@ -188,38 +202,141 @@ impl UserInputReader {
 
 struct Env {
     number_variables: HashMap<String, f64>,
+    string_variables: HashMap<String, String>,
     user_input_reader: UserInputReader,
-    loop_line_numbers: HashMap<String, i32>,
-    current_line_number: i32,
-    subroutines: Vec<i32>,
+    loop_line_numbers: HashMap<String, usize>,
+    current_line_number: usize,
+    subroutines: Vec<usize>,
+    data_by_line_number: BTreeMap<usize, Vec<String>>,
+    current_data_line_number: usize,
+    current_data_column: usize,
 }
 
 impl Env {
-    fn new(user_input_reader: UserInputReader) -> Env {
+    fn new(user_input_reader: UserInputReader, program: &Program) -> Env {
         Env {
             number_variables: HashMap::new(),
+            string_variables: HashMap::new(),
             user_input_reader,
             loop_line_numbers: HashMap::new(),
             current_line_number: 0,
-            subroutines: vec!(),
+            subroutines: vec![],
+            data_by_line_number: {
+                let tuples: Vec<(usize, String)> = program
+                    .lines
+                    .iter()
+                    .flat_map(|(line_number, command)| match command {
+                        Command::Data(args) => {
+                            let res: Vec<(usize, String)> = args
+                                .iter()
+                                .map(|expression| match expression {
+                                    Expression::Integer(value) => (*line_number, value.to_string()),
+                                    Expression::Text(value) => (*line_number, value.to_string()),
+                                    _ => panic!(),
+                                })
+                                .collect();
+                            res
+                        }
+                        _ => vec![],
+                    })
+                    .collect();
+
+                let mut map = BTreeMap::new();
+                for (k, v) in tuples {
+                    map.entry(k).or_insert_with(Vec::new).push(v.to_string());
+                }
+                map
+            },
+            current_data_line_number: 0,
+            current_data_column: 0,
         }
     }
 
     fn read_line(&self) -> (String, UserInputReader) {
         self.user_input_reader.next()
     }
+
+    fn number_data(&mut self) -> Result<f64, String> {
+        match self
+            .data_by_line_number
+            .range((Included(&self.current_data_line_number), Unbounded))
+            .next()
+        {
+            None => Err(format!(
+                "No number data available, current_data_line_number = {}",
+                self.current_data_line_number
+            )),
+            Some((line_number, line)) => {
+                self.current_data_line_number = *line_number;
+                match line.get(self.current_data_column) {
+                    None => Err("No data available at the expected column".to_string()),
+                    Some(item) => {
+                        if self.current_data_column + 1 == line.len() {
+                            self.current_data_column = 0;
+                            self.current_data_line_number = match self
+                                .data_by_line_number
+                                .range((Excluded(self.current_data_line_number), Unbounded))
+                                .next()
+                            {
+                                None => 1000000,
+                                Some((line_number, _)) => *line_number,
+                            }
+                        } else {
+                            self.current_data_column += 1;
+                        }
+                        match item.parse() {
+                            Ok(value) => Ok(value),
+                            Err(parse_float_error) => Err(parse_float_error.to_string()),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn string_data(&mut self) -> Result<String, String> {
+        match self
+            .data_by_line_number
+            .range((Included(&self.current_data_line_number), Unbounded))
+            .next()
+        {
+            None => Err(format!(
+                "No string data available, current_data_line_number = {}",
+                self.current_data_line_number
+            )),
+            Some((line_number, line)) => {
+                self.current_data_line_number = *line_number;
+                match line.get(self.current_data_column) {
+                    None => Err(format!("No data available at the expected column - line = {:#?}, current_data_column = {}",
+                        *line, self.current_data_column)),
+                    Some(item) => {
+                        if self.current_data_column + 1 == line.len() {
+                            self.current_data_column = 0;
+                            self.current_data_line_number = match self.data_by_line_number.range((Excluded(self.current_data_line_number), Unbounded)).next() {
+                                None => 1000000,
+                                Some((line_number, _)) => *line_number
+                            }
+                        } else {
+                            self.current_data_column += 1;
+                        }
+                        Ok(item.to_string())
+                    }
+                }
+            }
+        }
+    }
 }
 
 enum CommandResult {
     Output(String),
-    Jump(i32),
+    Jump(usize),
     Stop(String),
 }
 
 #[derive(Clone)]
 enum Command {
     Let(String, Expression),
-    Goto(i32),
+    Goto(usize),
     Print(Vec<Expression>),
     Input(Vec<Expression>),
     Rem(String),
@@ -227,8 +344,10 @@ enum Command {
     Stop,
     For(String, Expression, Expression, Expression),
     Next(String),
-    Gosub(i32),
+    Gosub(usize),
     Return,
+    Read(Vec<Expression>),
+    Data(Vec<Expression>),
 }
 
 impl Command {
@@ -346,19 +465,38 @@ impl Command {
                 None => {
                     env.number_variables.remove(variable_name);
                     Ok(CommandResult::Output("".to_string()))
-                },
+                }
                 Some(line_number) => Ok(CommandResult::Jump(*line_number)),
             },
             Command::Gosub(line_number) => {
                 env.subroutines.push(env.current_line_number);
                 Ok(CommandResult::Jump(*line_number))
             }
-            Command::Return => {
-                match env.subroutines.pop() {
-                    None => Err("No matching gosub for return".to_string()),
-                    Some(line_number) => Ok(CommandResult::Jump(line_number + 1)),
+            Command::Return => match env.subroutines.pop() {
+                None => Err("No matching gosub for return".to_string()),
+                Some(line_number) => Ok(CommandResult::Jump(line_number + 1)),
+            },
+            Command::Read(variables) => {
+                for v in variables {
+                    match v {
+                        Expression::NumberVariable(name) => match env.number_data() {
+                            Ok(value) => {
+                                env.number_variables.insert(name.to_string(), value);
+                            }
+                            Err(message) => return Err(message),
+                        },
+                        Expression::StringVariable(name) => match env.string_data() {
+                            Ok(value) => {
+                                env.string_variables.insert(name.to_string(), value);
+                            }
+                            Err(message) => return Err(message),
+                        },
+                        _ => return Err("Can only read into variables".to_string()),
+                    }
                 }
+                Ok(CommandResult::Output("".to_string()))
             }
+            Command::Data(_) => Ok(CommandResult::Output("".to_string())),
         }
     }
 }
@@ -379,7 +517,7 @@ impl LinesLimit {
 
 #[derive(Default)]
 struct Program {
-    lines: BTreeMap<i32, Command>,
+    lines: BTreeMap<usize, Command>,
 }
 
 impl Program {
@@ -389,7 +527,7 @@ impl Program {
         }
     }
 
-    fn add_line(&mut self, line_number: i32, command: Command) -> &mut Self {
+    fn add_line(&mut self, line_number: usize, command: Command) -> &mut Self {
         self.lines.insert(line_number, command);
         self
     }
@@ -400,7 +538,7 @@ impl Program {
         user_input_reader: UserInputReader,
     ) -> Result<String, String> {
         let mut output = String::new();
-        let mut env = Env::new(user_input_reader);
+        let mut env = Env::new(user_input_reader, &self);
 
         self.run_helper(lines_limit, &mut output, &mut env, self.lines.clone())
     }
@@ -410,7 +548,7 @@ impl Program {
         lines_limit: LinesLimit,
         output: &mut String,
         env: &mut Env,
-        lines: BTreeMap<i32, Command>,
+        lines: BTreeMap<usize, Command>,
     ) -> Result<String, String> {
         for (line, command) in lines {
             env.current_line_number = line;
@@ -423,7 +561,7 @@ impl Program {
                         LinesLimit::Limit(_) => return Ok(output.to_string()),
                     }
 
-                    let mut child_lines: BTreeMap<i32, Command> = BTreeMap::new();
+                    let mut child_lines: BTreeMap<usize, Command> = BTreeMap::new();
                     for (l, command) in &self.lines {
                         if l >= line_number {
                             let unboxed_command: Command = command.clone();
@@ -450,7 +588,7 @@ impl Program {
 
 #[cfg(test)]
 mod tests {
-    use crate::UserInputReader::{RealStdin};
+    use crate::UserInputReader::RealStdin;
     use crate::*;
     use Command::*;
 
@@ -864,16 +1002,39 @@ mod tests {
     #[test]
     fn simple_nested_for() {
         let mut program = Program::new();
-        program.add_line(10, Command::for_loop("a", Expression::Integer(1), Expression::Integer(2), Expression::Integer(1)));
-        program.add_line(20, Command::for_loop("b", Expression::Integer(3), Expression::Integer(4), Expression::Integer(1)));
-        program.add_line(30, Print(vec!(Expression::number_variable("a"), Expression::number_variable("b"))));
+        program.add_line(
+            10,
+            Command::for_loop(
+                "a",
+                Expression::Integer(1),
+                Expression::Integer(2),
+                Expression::Integer(1),
+            ),
+        );
+        program.add_line(
+            20,
+            Command::for_loop(
+                "b",
+                Expression::Integer(3),
+                Expression::Integer(4),
+                Expression::Integer(1),
+            ),
+        );
+        program.add_line(
+            30,
+            Print(vec![
+                Expression::number_variable("a"),
+                Expression::number_variable("b"),
+            ]),
+        );
         program.add_line(40, Command::next("b"));
         program.add_line(50, Command::next("a"));
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
-        Ok("1 3\n1 4\n2 3\n2 4\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("1 3\n1 4\n2 3\n2 4\n".to_string())
+        );
     }
-
 
     // 10 REM “A rearranged guessing game”
     // 20 INPUT a:
@@ -891,7 +1052,10 @@ mod tests {
         let a = &Expression::number_variable("a");
         let b = &Expression::number_variable("b");
         program.add_line(20, Input(vec![a.clone()]));
-        program.add_line(30, Input(vec![Expression::text("Guess the number "), b.clone()]));
+        program.add_line(
+            30,
+            Input(vec![Expression::text("Guess the number "), b.clone()]),
+        );
         program.add_line(
             40,
             If(
@@ -908,7 +1072,11 @@ mod tests {
         assert_eq!(
             program.run(
                 LinesLimit::NoLimit,
-                UserInputReader::FakeStdins(vec!("5".to_string(), "3".to_string(), "5".to_string()))
+                UserInputReader::FakeStdins(vec!(
+                    "5".to_string(),
+                    "3".to_string(),
+                    "5".to_string()
+                ))
             ),
             Ok("Guess the number \nTry again\nGuess the number \nCorrect\n".to_string())
         );
@@ -923,14 +1091,75 @@ mod tests {
     fn simpler_gosub() {
         let mut program = Program::new();
         program.add_line(10, Gosub(30));
-        program.add_line(20, Print(vec!(Expression::text("20"))));
+        program.add_line(20, Print(vec![Expression::text("20")]));
         program.add_line(25, Stop);
-        program.add_line(30, Print(vec!(Expression::text("30"))));
+        program.add_line(30, Print(vec![Expression::text("30")]));
         program.add_line(40, Return);
 
         assert_eq!(
             program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
             Ok("30\n20\n".to_string())
+        );
+    }
+
+    // 10 READ d$
+    // 20 PRINT “The date is”,d$
+    // 30 DATA “June lst, 1982”
+    // 40 STOP
+    #[test]
+    fn data() {
+        let mut program = Program::new();
+        program.add_line(10, Read(vec![Expression::string_variable("d$")]));
+        program.add_line(
+            20,
+            Print(vec![
+                Expression::text("The date is"),
+                Expression::string_variable("d$"),
+            ]),
+        );
+        program.add_line(30, Data(vec![Expression::text("June 1st, 1982")]));
+
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("The date is June 1st, 1982\n".to_string())
+        );
+    }
+
+    // 10 READ a,b,c
+    // 20 PRINT “The numbers are”,a,b,c
+    // 30 DATA 1234, 5678
+    // 40 DATA 9101
+    // 50 STOP
+    #[test]
+    fn multiple_data() {
+        let mut program = Program::new();
+        program.add_line(
+            10,
+            Read(vec![
+                Expression::number_variable("a"),
+                Expression::number_variable("b"),
+                Expression::number_variable("c"),
+            ]),
+        );
+        program.add_line(
+            20,
+            Print(vec![
+                Expression::text("The numbers are"),
+                Expression::number_variable("a"),
+                Expression::number_variable("b"),
+                Expression::number_variable("c"),
+            ]),
+        );
+        program.add_line(
+            30,
+            Data(vec![Expression::Integer(1234), Expression::Integer(5678)]),
+        );
+        program.add_line(40, Data(vec![Expression::Integer(9101)]));
+        program.add_line(50, Stop);
+
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("The numbers are 1234 5678 9101\n".to_string())
         );
     }
 }
