@@ -1,9 +1,9 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::io::stdin;
 use std::ops;
 use std::result::Result;
 use std::vec::Vec;
+use crate::UserInputReader::FakeStdins;
 
 #[derive(Clone)]
 enum Expression {
@@ -58,14 +58,14 @@ impl Expression {
     fn number_variable(name: &str) -> Expression {
         Expression::NumberVariable(name.to_string())
     }
-    fn greater_than(self, other: Expression) -> Expression {
-        Expression::GreaterThan(Box::from(self), Box::from(other))
+    fn greater_than(&self, other: &Expression) -> Expression {
+        Expression::GreaterThan(Box::from(self.clone()), Box::from(other.clone()))
     }
-    fn are_equal(self, other: Expression) -> Expression {
-        Expression::AreEqual(Box::from(self), Box::from(other))
+    fn are_equal(&self, other: &Expression) -> Expression {
+        Expression::AreEqual(Box::from(self.clone()), Box::from(other.clone()))
     }
-    fn less_than(self, other: Expression) -> Expression {
-        Expression::LessThan(Box::from(self), Box::from(other))
+    fn less_than(&self, other: &Expression) -> Expression {
+        Expression::LessThan(Box::from(self.clone()), Box::from(other.clone()))
     }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
@@ -164,20 +164,24 @@ impl Expression {
     }
 }
 
+#[derive(Clone)]
 enum UserInputReader {
     RealStdin,
     FakeStdin(String),
+    FakeStdins(Vec<String>),
 }
 
 impl UserInputReader {
-    fn next(&self) -> String {
+    fn next(&self) -> (String, UserInputReader) {
         match self {
-            UserInputReader::RealStdin => {
-                let mut output = String::new();
-                stdin().read_line(&mut output).unwrap();
-                output
+            UserInputReader::RealStdin => todo!(),
+            UserInputReader::FakeStdin(input) => (input.to_string(), self.clone()),
+            UserInputReader::FakeStdins(inputs) => {
+                let first = inputs.first();
+                let mut others = inputs.clone();
+                others.remove(0);
+                (first.unwrap().to_string(), FakeStdins(others))
             }
-            UserInputReader::FakeStdin(input) => input.to_string(),
         }
     }
 }
@@ -187,6 +191,7 @@ struct Env {
     user_input_reader: UserInputReader,
     loop_line_numbers: HashMap<String, i32>,
     current_line_number: i32,
+    subroutines: Vec<i32>,
 }
 
 impl Env {
@@ -196,10 +201,11 @@ impl Env {
             user_input_reader,
             loop_line_numbers: HashMap::new(),
             current_line_number: 0,
+            subroutines: vec!(),
         }
     }
 
-    fn read_line(&self) -> String {
+    fn read_line(&self) -> (String, UserInputReader) {
         self.user_input_reader.next()
     }
 }
@@ -221,6 +227,8 @@ enum Command {
     Stop,
     For(String, Expression, Expression, Expression),
     Next(String),
+    Gosub(i32),
+    Return,
 }
 
 impl Command {
@@ -266,7 +274,8 @@ impl Command {
                         }
                         Expression::NumberVariable(name) => {
                             let value = env.read_line();
-                            match value.parse::<f64>() {
+                            env.user_input_reader = value.1.clone();
+                            match value.0.parse::<f64>() {
                                 Ok(v) => {
                                     env.number_variables.insert(name.to_owned(), v);
                                 }
@@ -326,7 +335,7 @@ impl Command {
                     }
                     (Entry::Occupied(mut o), Ok(_), Ok(e), Ok(s)) => {
                         o.insert(o.get() + s);
-                        if *o.get() == e {
+                        if (s > 0.0 && *o.get() >= e) || (s < 0.0 && *o.get() <= e) {
                             env.loop_line_numbers.remove(variable_name.as_str());
                         }
                         Ok(CommandResult::Output("".to_string()))
@@ -334,9 +343,22 @@ impl Command {
                 }
             }
             Command::Next(variable_name) => match env.loop_line_numbers.get(variable_name) {
-                None => Ok(CommandResult::Output("".to_string())),
+                None => {
+                    env.number_variables.remove(variable_name);
+                    Ok(CommandResult::Output("".to_string()))
+                },
                 Some(line_number) => Ok(CommandResult::Jump(*line_number)),
             },
+            Command::Gosub(line_number) => {
+                env.subroutines.push(env.current_line_number);
+                Ok(CommandResult::Jump(*line_number))
+            }
+            Command::Return => {
+                match env.subroutines.pop() {
+                    None => Err("No matching gosub for return".to_string()),
+                    Some(line_number) => Ok(CommandResult::Jump(line_number + 1)),
+                }
+            }
         }
     }
 }
@@ -390,7 +412,8 @@ impl Program {
         env: &mut Env,
         lines: BTreeMap<i32, Command>,
     ) -> Result<String, String> {
-        for (_, command) in lines {
+        for (line, command) in lines {
+            env.current_line_number = line;
             match &(command.run(env)) {
                 Ok(CommandResult::Output(text)) => output.push_str(text),
                 Ok(CommandResult::Jump(line_number)) => {
@@ -427,7 +450,7 @@ impl Program {
 
 #[cfg(test)]
 mod tests {
-    use crate::UserInputReader::RealStdin;
+    use crate::UserInputReader::{RealStdin};
     use crate::*;
     use Command::*;
 
@@ -646,14 +669,14 @@ mod tests {
         program.add_line(
             40,
             If(
-                Expression::number_variable("b").are_equal(Expression::number_variable("a")),
+                Expression::number_variable("b").are_equal(&Expression::number_variable("a")),
                 vec![Print(vec![Expression::text("That is correct")]), Stop],
             ),
         );
         program.add_line(
             56,
             If(
-                Expression::number_variable("b").less_than(Expression::number_variable("a")),
+                Expression::number_variable("b").less_than(&Expression::number_variable("a")),
                 vec![Print(vec![Expression::text(
                     "That is too small, try again",
                 )])],
@@ -662,7 +685,7 @@ mod tests {
         program.add_line(
             66,
             If(
-                Expression::number_variable("b").greater_than(Expression::number_variable("a")),
+                Expression::number_variable("b").greater_than(&Expression::number_variable("a")),
                 vec![Print(vec![Expression::text("That is too big, try again")])],
             ),
         );
@@ -687,7 +710,7 @@ mod tests {
         program.add_line(
             10,
             If(
-                Expression::Integer(4).greater_than(Expression::Integer(3)),
+                Expression::Integer(4).greater_than(&Expression::Integer(3)),
                 vec![Stop],
             ),
         );
@@ -705,7 +728,7 @@ mod tests {
         program.add_line(
             10,
             If(
-                Expression::Integer(4).greater_than(Expression::Integer(3)),
+                Expression::Integer(4).greater_than(&Expression::Integer(3)),
                 vec![
                     Print(vec![Expression::text("Foo")]),
                     Print(vec![Expression::text("Bar")]),
@@ -726,7 +749,7 @@ mod tests {
         program.add_line(
             10,
             If(
-                Expression::Integer(4).greater_than(Expression::Integer(3)),
+                Expression::Integer(4).greater_than(&Expression::Integer(3)),
                 vec![Print(vec![Expression::text("Foo")]), Stop],
             ),
         );
@@ -820,7 +843,7 @@ mod tests {
         program.add_line(
             40,
             If(
-                Expression::number_variable("c").greater_than(Expression::number_variable("n")),
+                Expression::number_variable("c").greater_than(&Expression::number_variable("n")),
                 vec![Command::let_equal("n", Expression::number_variable("c"))],
             ),
         );
@@ -830,6 +853,84 @@ mod tests {
         assert_eq!(
             program.run(LinesLimit::NoLimit, RealStdin),
             Ok("6\n".to_string())
+        );
+    }
+
+    // 10 FOR a=1 TO 2 STEP 1
+    // 20 FOR b=3 TO 4 STEP 1
+    // 30 PRINT a,b
+    // 40 NEXT b
+    // 50 NEXT a
+    #[test]
+    fn simple_nested_for() {
+        let mut program = Program::new();
+        program.add_line(10, Command::for_loop("a", Expression::Integer(1), Expression::Integer(2), Expression::Integer(1)));
+        program.add_line(20, Command::for_loop("b", Expression::Integer(3), Expression::Integer(4), Expression::Integer(1)));
+        program.add_line(30, Print(vec!(Expression::number_variable("a"), Expression::number_variable("b"))));
+        program.add_line(40, Command::next("b"));
+        program.add_line(50, Command::next("a"));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
+        Ok("1 3\n1 4\n2 3\n2 4\n".to_string()));
+    }
+
+
+    // 10 REM “A rearranged guessing game”
+    // 20 INPUT a:
+    // 30 INPUT “Guess the number “,b
+    // 40 IF a=b THEN PRINT “Correct”: STOP
+    // 50 IF a<b THEN GO SUB 100
+    // 60 IF a>b THEN GO SUB 100
+    // 70 GO TO 30
+    // 100 PRINT “Try again”
+    // 110 RETURN
+    #[test]
+    fn gosub() {
+        let mut program = Program::new();
+        program.add_line(10, Rem("A rearranged guessing game".to_string()));
+        let a = &Expression::number_variable("a");
+        let b = &Expression::number_variable("b");
+        program.add_line(20, Input(vec![a.clone()]));
+        program.add_line(30, Input(vec![Expression::text("Guess the number "), b.clone()]));
+        program.add_line(
+            40,
+            If(
+                a.are_equal(&b),
+                vec![Print(vec![Expression::text("Correct")]), Stop],
+            ),
+        );
+        program.add_line(50, If(a.less_than(&b), vec![Gosub(100)]));
+        program.add_line(60, If(a.greater_than(&b), vec![Gosub(100)]));
+        program.add_line(70, Goto(30));
+        program.add_line(100, Print(vec![Expression::text("Try again")]));
+        program.add_line(110, Return);
+
+        assert_eq!(
+            program.run(
+                LinesLimit::NoLimit,
+                UserInputReader::FakeStdins(vec!("5".to_string(), "3".to_string(), "5".to_string()))
+            ),
+            Ok("Guess the number \nTry again\nGuess the number \nCorrect\n".to_string())
+        );
+    }
+
+    // 10 GO SUB 30
+    // 20 PRINT "20"
+    // 25 STOP
+    // 30 PRINT "30"
+    // 40 RETURN
+    #[test]
+    fn simpler_gosub() {
+        let mut program = Program::new();
+        program.add_line(10, Gosub(30));
+        program.add_line(20, Print(vec!(Expression::text("20"))));
+        program.add_line(25, Stop);
+        program.add_line(30, Print(vec!(Expression::text("30"))));
+        program.add_line(40, Return);
+
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
+            Ok("30\n20\n".to_string())
         );
     }
 }
