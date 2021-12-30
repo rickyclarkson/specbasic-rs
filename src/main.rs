@@ -28,6 +28,7 @@ enum Expression {
     Sgn(Box<Expression>),
     Abs(Box<Expression>),
     Int(Box<Expression>),
+    Sqr(Box<Expression>),
 }
 
 impl ops::Add for Expression {
@@ -99,6 +100,9 @@ impl Expression {
     fn int(&self) -> Expression {
         Expression::Int(Box::from(self.clone()))
     }
+    fn sqr(&self) -> Expression {
+        Expression::Sqr(Box::from(self.clone()))
+    }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -146,6 +150,7 @@ impl Expression {
             },
             Expression::Abs(number_value) => number_value.to_f64(env).map(|v| v.abs().to_string()),
             Expression::Int(number_value) => number_value.to_f64(env).map(|v| (v as i32).to_string()),
+            Expression::Sqr(number_value) => number_value.to_f64(env).map(|v| v.sqrt().to_string()),
         }
     }
 
@@ -200,6 +205,7 @@ impl Expression {
                 Err(m) => Err(m)
             },
             Expression::Int(number_expression) => number_expression.to_f64(env).map(|v| v as i32 as f64),
+            Expression::Sqr(number_expression) => number_expression.to_f64(env).map(|v| v.sqrt()),
         }
     }
 
@@ -243,7 +249,7 @@ impl Expression {
             Expression::Len(_) => Err("Cannot convert a length to bool".to_string()),
             Expression::Number(_) => Err("Cannot convert a number to bool".to_string()),
             Expression::Str(_) => Err("Cannot convert a string to bool".to_string()),
-            Expression::Sgn(_) | Expression::Abs(_) | Expression::Int(_) => Err("Cannot convert a number to bool".to_string()),
+            Expression::Sgn(_) | Expression::Abs(_) | Expression::Int(_) | Expression::Sqr(_) => Err("Cannot convert a number to bool".to_string()),
         }
     }
 }
@@ -1319,6 +1325,15 @@ mod tests {
         program.add_line(10, Print(vec!(Expression::Number(2.5).int())));
 
         assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("2\n".to_string()));
+    }
+
+    // 10 PRINT SQR 4096
+    #[test]
+    fn sqr() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec!(Expression::Number(4096.0).sqr())));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("64\n".to_string()));
     }
 }
 
