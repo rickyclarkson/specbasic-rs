@@ -1,8 +1,11 @@
+#![feature(iter_zip)]
+
 use crate::UserInputReader::FakeStdins;
 use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map::Entry;
 use std::collections::Bound::Unbounded;
 use std::collections::HashMap;
+use std::iter::zip;
 use std::ops;
 use std::ops::Bound::{Excluded, Included};
 use std::result::Result;
@@ -29,6 +32,7 @@ enum Expression {
     Abs(Box<Expression>),
     Int(Box<Expression>),
     Sqr(Box<Expression>),
+    Fn(String, Vec<Expression>),
 }
 
 impl ops::Add for Expression {
@@ -103,6 +107,9 @@ impl Expression {
     fn sqr(&self) -> Expression {
         Expression::Sqr(Box::from(self.clone()))
     }
+    fn function(name: &str, parameter_values: Vec<Expression>) -> Expression {
+        Expression::Fn(name.to_string(), parameter_values)
+    }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -151,7 +158,38 @@ impl Expression {
             Expression::Abs(number_value) => number_value.to_f64(env).map(|v| v.abs().to_string()),
             Expression::Int(number_value) => number_value.to_f64(env).map(|v| (v as i32).to_string()),
             Expression::Sqr(number_value) => number_value.to_f64(env).map(|v| v.sqrt().to_string()),
+            Expression::Fn(function_name, parameter_values) => {
+                match env.functions.get(function_name) {
+                    None => Err("No function found".to_string()),
+                    Some(f) => match Self::create_fn_env(env, parameter_values, f) {
+                        Ok(e) => f.body.to_string(&e),
+                        Err(m) => Err(m)
+                    }
+                }
+            }
         }
+    }
+
+    fn create_fn_env(env: &Env, parameter_values: &Vec<Expression>, f: &Function) -> Result<Env, String> {
+        let mut new_env = env.clone();
+        for (name, value) in zip(&f.parameter_names, parameter_values) {
+            if name.ends_with("$") {
+                match value.to_string(env) {
+                    Ok(v) => {
+                        new_env.string_variables.insert(name.to_string(), v);
+                    },
+                    Err(m) => return Err(m)
+                }
+            } else {
+                match value.to_f64(env) {
+                    Ok(v) => {
+                        new_env.number_variables.insert(name.to_string(), v);
+                    }
+                    Err(m) => return Err(m)
+                }
+            }
+        }
+        Ok(new_env.clone())
     }
 
     fn to_f64(&self, env: &Env) -> Result<f64, String> {
@@ -206,6 +244,32 @@ impl Expression {
             },
             Expression::Int(number_expression) => number_expression.to_f64(env).map(|v| v as i32 as f64),
             Expression::Sqr(number_expression) => number_expression.to_f64(env).map(|v| v.sqrt()),
+            Expression::Fn(function_name, parameter_values) => {
+                match env.functions.get(function_name) {
+                    None => Err("No function found".to_string()),
+                    Some(f) => {
+                        let mut new_env = env.clone();
+                        for (name, value) in zip(&f.parameter_names, parameter_values) {
+                            if name.ends_with("$") {
+                                match value.to_string(env) {
+                                    Ok(v) => {
+                                        new_env.string_variables.insert(name.to_string(), v);
+                                    },
+                                    Err(m) => return Err(m)
+                                }
+                            } else {
+                                match value.to_f64(env) {
+                                    Ok(v) => {
+                                        new_env.number_variables.insert(name.to_string(), v);
+                                    }
+                                    Err(m) => return Err(m)
+                                }
+                            }
+                        }
+                        f.body.to_f64(&new_env)
+                    }
+                }
+            }
         }
     }
 
@@ -250,6 +314,17 @@ impl Expression {
             Expression::Number(_) => Err("Cannot convert a number to bool".to_string()),
             Expression::Str(_) => Err("Cannot convert a string to bool".to_string()),
             Expression::Sgn(_) | Expression::Abs(_) | Expression::Int(_) | Expression::Sqr(_) => Err("Cannot convert a number to bool".to_string()),
+            Expression::Fn(function_name, parameter_values) => {
+                match env.functions.get(function_name) {
+                    None => Err("No function found".to_string()),
+                    Some(f) => {
+                        match Self::create_fn_env(env, parameter_values, &f) {
+                            Ok(e) => f.body.to_bool(&e),
+                            Err(m) => return Err(m)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -276,6 +351,7 @@ impl UserInputReader {
     }
 }
 
+#[derive(Clone)]
 struct Env {
     number_variables: HashMap<String, f64>,
     string_variables: HashMap<String, String>,
@@ -286,6 +362,7 @@ struct Env {
     data_by_line_number: BTreeMap<usize, Vec<String>>,
     current_data_line_number: usize,
     current_data_column: usize,
+    functions: HashMap<String, Function>,
 }
 
 impl Env {
@@ -325,6 +402,7 @@ impl Env {
             },
             current_data_line_number: 0,
             current_data_column: 0,
+            functions: HashMap::new(),
         }
     }
 
@@ -424,6 +502,7 @@ enum Command {
     Return,
     Read(Vec<Expression>),
     Data(Vec<Expression>),
+    DefFn(String, Vec<String>, Expression),
 }
 
 impl Command {
@@ -440,6 +519,9 @@ impl Command {
     }
     fn next(variable_name: &str) -> Command {
         Command::Next(variable_name.to_string())
+    }
+    fn def_fn(function_name: &str, parameter_names: Vec<&str>, body: &Expression) -> Command {
+        Command::DefFn(function_name.to_string(), parameter_names.iter().map(|v| v.to_string()).collect(), body.clone())
     }
     fn run(&self, env: &mut Env) -> Result<CommandResult, String> {
         match self {
@@ -581,6 +663,13 @@ impl Command {
                 Ok(CommandResult::Output("".to_string()))
             }
             Command::Data(_) => Ok(CommandResult::Output("".to_string())),
+            Command::DefFn(function_name, parameter_names, body) => {
+                env.functions.insert(function_name.to_string(), Function {
+                    parameter_names: parameter_names.clone(),
+                    body: body.clone(),
+                });
+                Ok(CommandResult::Output("".to_string()))
+            }
         }
     }
 }
@@ -668,6 +757,12 @@ impl Program {
         }
         Ok(output.to_string())
     }
+}
+
+#[derive(Clone)]
+struct Function {
+    parameter_names: Vec<String>,
+    body: Expression,
 }
 
 #[cfg(test)]
@@ -1334,6 +1429,17 @@ mod tests {
         program.add_line(10, Print(vec!(Expression::Number(4096.0).sqr())));
 
         assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("64\n".to_string()));
+    }
+
+    // 10 DEF FN s(x)=x*x
+    // 20 PRINT FN s(4)
+    #[test]
+    fn def_fn() {
+        let mut program = Program::new();
+        program.add_line(10, Command::def_fn("s", vec!("x"), &(Expression::number_variable("x") * Expression::number_variable("x"))));
+        program.add_line(20, Print(vec!(Expression::function("s", vec!(Expression::Number(4.0))))));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("16\n".to_string()));
     }
 }
 
