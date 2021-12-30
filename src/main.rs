@@ -25,6 +25,7 @@ enum Expression {
     Len(Box<Expression>),
     Number(f64),
     Str(Box<Expression>),
+    Sgn(Box<Expression>),
 }
 
 impl ops::Add for Expression {
@@ -87,6 +88,9 @@ impl Expression {
     fn str(&self) -> Expression {
         Expression::Str(Box::from(self.clone()))
     }
+    fn sgn(&self) -> Expression {
+        Expression::Sgn(Box::from(self.clone()))
+    }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -126,6 +130,10 @@ impl Expression {
             Expression::Number(value) => Ok(value.to_string()),
             Expression::Str(number_value) => match number_value.to_string(env) {
                 Ok(value) => Ok(value),
+                Err(m) => Err(m)
+            },
+            Expression::Sgn(number_value) => match number_value.to_f64(env) {
+                Ok(value) => Ok(if value == 0.0 { "0".to_string() } else { value.signum().to_string() }),
                 Err(m) => Err(m)
             }
         }
@@ -173,6 +181,10 @@ impl Expression {
             },
             Expression::Number(value) => Ok(*value),
             Expression::Str(_) => Err("Str returns a string, not a number".to_string()),
+            Expression::Sgn(number_expression) => match number_expression.to_f64(env) {
+                Ok(value) => Ok(if value == 0.0 { 0.0 } else { value.signum() }),
+                Err(m) => Err(m)
+            }
         }
     }
 
@@ -216,6 +228,7 @@ impl Expression {
             Expression::Len(_) => Err("Cannot convert a length to bool".to_string()),
             Expression::Number(_) => Err("Cannot convert a number to bool".to_string()),
             Expression::Str(_) => Err("Cannot convert a string to bool".to_string()),
+            Expression::Sgn(_) => Err("Cannot convert a number to bool".to_string()),
         }
     }
 }
@@ -1260,6 +1273,19 @@ mod tests {
         program.add_line(10, Print(vec!(Expression::Number(100.0000).str().len())));
 
         assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("3\n".to_string()));
+    }
+
+    // 10 PRINT SGN -10, SGN 0, SGN 10
+    #[test]
+    fn sgn() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec!(
+            Expression::sgn(&Expression::Integer(-10)),
+            Expression::sgn(&Expression::Integer(0)),
+            Expression::sgn(&Expression::Integer(10))
+        )));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("-1 0 1\n".to_string()));
     }
 }
 
