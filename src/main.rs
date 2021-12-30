@@ -22,6 +22,7 @@ enum Expression {
     LessThan(Box<Expression>, Box<Expression>),
     GreaterThan(Box<Expression>, Box<Expression>),
     Slice(Box<Expression>, Option<Box<Expression>>, Option<Box<Expression>>),
+    Len(Box<Expression>),
 }
 
 impl ops::Add for Expression {
@@ -78,6 +79,9 @@ impl Expression {
     fn slice(&self, begin: Option<Expression>, end: Option<Expression>) -> Expression {
         Expression::Slice(Box::from(self.clone()), begin.map(Box::from), end.map(Box::from))
     }
+    fn len(&self) -> Expression {
+        Expression::Len(Box::from(self.clone()))
+    }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -110,15 +114,10 @@ impl Expression {
                     (Ok(s), Some(Ok(b)), Some(Ok(e))) => Ok(s[(b as usize - 1)..(e as usize)].to_string()),
                 }
             },
-            /*    Ok(match (*begin, *end) {
-                (Some(b), Some(e)) => match (**string).to_string(env) {
-                    Ok(value) => val
-                    Err(_) => {}
-                },
-                (None, Some(e)) => string[..e],
-                (Some(b), None) => string[b..],
-                (None, None) => string[..],
-            }.to_string())*/
+            Expression::Len(string_expression) => match string_expression.to_string(env) {
+                Ok(s) => Ok(s.len().to_string()),
+                Err(m) => Err(m)
+            },
         }
     }
 
@@ -158,6 +157,10 @@ impl Expression {
             Expression::GreaterThan(_, _) => Err("GreaterThan gives a bool, not an f64".to_string()),
             Expression::StringVariable(_) => Err("String variables hold a string, not an f64".to_string()),
             Expression::Slice(_, _, _) => Err("A slice is not a number".to_string()),
+            Expression::Len(string_expression) => match string_expression.to_string(env) {
+                Ok(value) => Ok(value.len() as f64),
+                Err(m) => Err(m)
+            }
         }
     }
 
@@ -198,6 +201,7 @@ impl Expression {
                 (Err(e), _) => Err(e.to_string()),
             },
             Expression::Slice(_, _, _) => Err("Cannot convert a slice to bool".to_string()),
+            Expression::Len(_) => Err("Cannot convert a length to bool".to_string()),
         }
     }
 }
@@ -1224,6 +1228,15 @@ mod tests {
 
         assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
         Ok("abcdef\nbcdef\ncdef\ndef\nef\nf\n".to_string()));
+    }
+
+    // 10 PRINT LEN "foo"
+    #[test]
+    fn len() {
+        let mut program = Program::new();
+        program.add_line(10, Command::Print(vec!(Expression::text("foo").len())));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("3\n".to_string()));
     }
 }
 
