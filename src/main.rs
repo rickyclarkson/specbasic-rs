@@ -1,5 +1,3 @@
-#![feature(iter_zip)]
-
 use crate::UserInputReader::FakeStdins;
 use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map::Entry;
@@ -33,6 +31,7 @@ enum Expression {
     Int(Box<Expression>),
     Sqr(Box<Expression>),
     Fn(String, Vec<Expression>),
+    RaiseTo(Box<Expression>, Box<Expression>),
 }
 
 impl ops::Add for Expression {
@@ -110,6 +109,9 @@ impl Expression {
     fn function(name: &str, parameter_values: Vec<Expression>) -> Expression {
         Expression::Fn(name.to_string(), parameter_values)
     }
+    fn raise_to(&self, power: Expression) -> Expression {
+        Expression::RaiseTo(Box::from(self.clone()), Box::from(power))
+    }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -166,6 +168,11 @@ impl Expression {
                         Err(m) => Err(m)
                     }
                 }
+            }
+            Expression::RaiseTo(number, power) => match (number.to_f64(env), power.to_f64(env)) {
+                (Err(m), _) => Err(m),
+                (_, Err(m)) => Err(m),
+                (Ok(n), Ok(p)) => Ok(n.powf(p).to_string()),
             }
         }
     }
@@ -270,6 +277,11 @@ impl Expression {
                     }
                 }
             }
+            Expression::RaiseTo(number, power) => match (number.to_f64(env), power.to_f64(env)) {
+                (Err(m), _) => Err(m),
+                (_, Err(m)) => Err(m),
+                (Ok(n), Ok(p)) => Ok(n.powf(p)),
+            }
         }
     }
 
@@ -313,7 +325,7 @@ impl Expression {
             Expression::Len(_) => Err("Cannot convert a length to bool".to_string()),
             Expression::Number(_) => Err("Cannot convert a number to bool".to_string()),
             Expression::Str(_) => Err("Cannot convert a string to bool".to_string()),
-            Expression::Sgn(_) | Expression::Abs(_) | Expression::Int(_) | Expression::Sqr(_) => Err("Cannot convert a number to bool".to_string()),
+            Expression::Sgn(_) | Expression::Abs(_) | Expression::Int(_) | Expression::Sqr(_) | Expression::RaiseTo(_, _) => Err("Cannot convert a number to bool".to_string()),
             Expression::Fn(function_name, parameter_values) => {
                 match env.functions.get(function_name) {
                     None => Err("No function found".to_string()),
@@ -1440,6 +1452,18 @@ mod tests {
         program.add_line(20, Print(vec!(Expression::function("s", vec!(Expression::Number(4.0))))));
 
         assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("16\n".to_string()));
+    }
+
+    // On the Spectrum it's actually an up arrow, not a ^
+    // 10 PRINT 3 ^ 5
+    #[test]
+    fn raise_to() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec!(Expression::Number(3.0).raise_to(Expression::Number(5.0)))));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("243\n".to_string())
+        );
     }
 }
 
