@@ -8,7 +8,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::result::Result;
 use std::vec::Vec;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Expression {
     Integer(i32),
     Text(String),
@@ -21,6 +21,7 @@ enum Expression {
     AreEqual(Box<Expression>, Box<Expression>),
     LessThan(Box<Expression>, Box<Expression>),
     GreaterThan(Box<Expression>, Box<Expression>),
+    Slice(Box<Expression>, Option<Box<Expression>>, Option<Box<Expression>>),
 }
 
 impl ops::Add for Expression {
@@ -74,6 +75,9 @@ impl Expression {
     fn less_than(&self, other: &Expression) -> Expression {
         Expression::LessThan(Box::from(self.clone()), Box::from(other.clone()))
     }
+    fn slice(&self, begin: Option<Expression>, end: Option<Expression>) -> Expression {
+        Expression::Slice(Box::from(self.clone()), begin.map(Box::from), end.map(Box::from))
+    }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -95,15 +99,33 @@ impl Expression {
             Expression::AreEqual(_, _) => self.to_string(env).map(|v| v.to_string()),
             Expression::LessThan(_, _) => self.to_string(env).map(|v| v.to_string()),
             Expression::GreaterThan(_, _) => self.to_string(env).map(|v| v.to_string()),
+            Expression::Slice(string, begin, end) => {
+                match (string.to_string(env), begin.clone().map(|b| b.to_f64(env)), end.clone().map(|e| e.to_f64(env))) {
+                    (Err(s), _, _) => Err(s),
+                    (_, Some(Err(s)), _) => Err(s),
+                    (_, _, Some(Err(s))) => Err(s),
+                    (Ok(s), None, None) => Ok(s),
+                    (Ok(s), Some(Ok(b)), None) => Ok(s[(b as usize - 1)..].to_string()),
+                    (Ok(s), None, Some(Ok(e))) => Ok(s[..(e as usize)].to_string()),
+                    (Ok(s), Some(Ok(b)), Some(Ok(e))) => Ok(s[(b as usize - 1)..(e as usize)].to_string()),
+                }
+            },
+            /*    Ok(match (*begin, *end) {
+                (Some(b), Some(e)) => match (**string).to_string(env) {
+                    Ok(value) => val
+                    Err(_) => {}
+                },
+                (None, Some(e)) => string[..e],
+                (Some(b), None) => string[b..],
+                (None, None) => string[..],
+            }.to_string())*/
         }
     }
 
     fn to_f64(&self, env: &Env) -> Result<f64, String> {
         match self {
             Expression::Integer(value) => Ok(*value as f64),
-            Expression::Text(_text) => {
-                Err("Expected a number, found something else, but I can't figure out how to include that in the error".to_string())
-            }
+            Expression::Text(_text) => Err(format!("Expected a number, found {:#?}", self)),
             Expression::NumberVariable(number_variable_name) =>
                 match env.number_variables.get(number_variable_name) {
                     Some(value) => Ok(*value),
@@ -135,6 +157,7 @@ impl Expression {
             Expression::LessThan(_, _) => Err("LessThan gives a bool, not an f64".to_string()),
             Expression::GreaterThan(_, _) => Err("GreaterThan gives a bool, not an f64".to_string()),
             Expression::StringVariable(_) => Err("String variables hold a string, not an f64".to_string()),
+            Expression::Slice(_, _, _) => Err("A slice is not a number".to_string()),
         }
     }
 
@@ -174,6 +197,7 @@ impl Expression {
                 (_, Err(e)) => Err(e.to_string()),
                 (Err(e), _) => Err(e.to_string()),
             },
+            Expression::Slice(_, _, _) => Err("Cannot convert a slice to bool".to_string()),
         }
     }
 }
@@ -367,7 +391,15 @@ impl Command {
     }
     fn run(&self, env: &mut Env) -> Result<CommandResult, String> {
         match self {
-            Command::Let(variable_name, value) => match value.to_f64(env) {
+            Command::Let(variable_name, value) if variable_name.ends_with("$") =>
+                match value.to_string(env) {
+                    Ok(v) => {
+                        env.string_variables.insert(variable_name.clone(), v);
+                        Ok(CommandResult::Output(String::new()))
+                    }
+                    Err(msg) => Err(msg.to_string()),
+                },
+                Command::Let(variable_name, value) => match value.to_f64(env) {
                 Ok(number) => {
                     env.number_variables.insert(variable_name.clone(), number);
                     Ok(CommandResult::Output(String::new()))
@@ -599,6 +631,18 @@ mod tests {
         program.add_line(10, Let("a".to_string(), Expression::Integer(10)));
         let output = program.run(LinesLimit::NoLimit, UserInputReader::RealStdin);
         assert_eq!(output, Ok("10\n".to_string()));
+    }
+
+    // 10 LET a$="Hi"
+    // 20 PRINT $a,$a
+    #[test]
+    fn let_string() {
+        let mut program = Program::new();
+        program.add_line(10, Command::let_equal("a$", Expression::text("Hi")));
+        program.add_line(20, Print(vec!(Expression::string_variable("a$"), Expression::string_variable("a$"))));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("Hi Hi\n".to_string()));
     }
 
     #[test]
@@ -1161,6 +1205,25 @@ mod tests {
             program.run(LinesLimit::NoLimit, RealStdin),
             Ok("The numbers are 1234 5678 9101\n".to_string())
         );
+    }
+
+    // 10 LET a$=“abcdef”
+    // 20 FOR n=1 TO 6
+    // 30 PRINT a$(n TO 6)
+    // 40 NEXT n
+    #[test]
+    fn slice() {
+        let mut program = Program::new();
+        program.add_line(10, Command::let_equal("a$", Expression::text("abcdef")));
+        program.add_line(20, Command::for_loop("n", Expression::Integer(1), Expression::Integer(6), Expression::Integer(1)));
+        program.add_line(30, Command::Print(vec!(Expression::string_variable("a$").slice(
+            Some(Expression::number_variable("n")),
+            Some(Expression::Integer(6))
+        ))));
+        program.add_line(40, Command::next("n"));
+
+        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
+        Ok("abcdef\nbcdef\ncdef\ndef\nef\nf\n".to_string()));
     }
 }
 
