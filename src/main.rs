@@ -33,6 +33,7 @@ enum Expression {
     Fn(String, Vec<Expression>),
     RaiseTo(Box<Expression>, Box<Expression>),
     Exp(Box<Expression>),
+    Ln(Box<Expression>),
 }
 
 impl ops::Add for Expression {
@@ -116,6 +117,9 @@ impl Expression {
     fn exp(&self) -> Expression {
         Expression::Exp(Box::from(self.clone()))
     }
+    fn ln(&self) -> Expression {
+        Expression::Ln(Box::from(self.clone()))
+    }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -179,6 +183,7 @@ impl Expression {
                 (Ok(n), Ok(p)) => Ok(n.powf(p).to_string()),
             },
             Expression::Exp(number) => number.to_f64(env).map(|v| v.exp().to_string()),
+            Expression::Ln(number) => number.to_f64(env).map(|v| v.ln().to_string()),
         }
     }
 
@@ -287,7 +292,8 @@ impl Expression {
                 (_, Err(m)) => Err(m),
                 (Ok(n), Ok(p)) => Ok(n.powf(p)),
             },
-            Expression::Exp(number) => number.to_f64(env)
+            Expression::Exp(number) => number.to_f64(env).map(|v| v.exp()),
+            Expression::Ln(number) => number.to_f64(env).map(|v| v.ln()),
         }
     }
 
@@ -331,7 +337,7 @@ impl Expression {
             Expression::Len(_) => Err("Cannot convert a length to bool".to_string()),
             Expression::Number(_) => Err("Cannot convert a number to bool".to_string()),
             Expression::Str(_) => Err("Cannot convert a string to bool".to_string()),
-            Expression::Sgn(_) | Expression::Abs(_) | Expression::Int(_) | Expression::Sqr(_) | Expression::RaiseTo(_, _) | Expression::Exp(_) => Err("Cannot convert a number to bool".to_string()),
+            Expression::Sgn(_) | Expression::Abs(_) | Expression::Int(_) | Expression::Sqr(_) | Expression::RaiseTo(_, _) | Expression::Exp(_) | Expression::Ln(_) => Err("Cannot convert a number to bool".to_string()),
             Expression::Fn(function_name, parameter_values) => {
                 match env.functions.get(function_name) {
                     None => Err("No function found".to_string()),
@@ -788,6 +794,7 @@ mod tests {
     use crate::UserInputReader::RealStdin;
     use crate::*;
     use Command::*;
+    use crate::LinesLimit::NoLimit;
 
     #[test]
     fn let_and_print() {
@@ -1480,6 +1487,16 @@ mod tests {
 
         assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
         Ok("7.38905609893065\n".to_string()));
+    }
+
+    // 10 PRINT LN 5
+    #[test]
+    fn ln() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec!(Expression::Number(5.0).ln())));
+
+        assert_eq!(program.run(NoLimit, RealStdin),
+        Ok("1.6094379124341003\n".to_string()));
     }
 }
 
