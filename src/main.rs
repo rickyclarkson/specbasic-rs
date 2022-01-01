@@ -22,7 +22,11 @@ enum Expression {
     AreEqual(Box<Expression>, Box<Expression>),
     LessThan(Box<Expression>, Box<Expression>),
     GreaterThan(Box<Expression>, Box<Expression>),
-    Slice(Box<Expression>, Option<Box<Expression>>, Option<Box<Expression>>),
+    Slice(
+        Box<Expression>,
+        Option<Box<Expression>>,
+        Option<Box<Expression>>,
+    ),
     Len(Box<Expression>),
     Number(f64),
     Str(Box<Expression>),
@@ -34,6 +38,12 @@ enum Expression {
     RaiseTo(Box<Expression>, Box<Expression>),
     Exp(Box<Expression>),
     Ln(Box<Expression>),
+    Sin(Box<Expression>),
+    Cos(Box<Expression>),
+    Tan(Box<Expression>),
+    Asn(Box<Expression>),
+    Acs(Box<Expression>),
+    Atn(Box<Expression>),
 }
 
 impl ops::Add for Expression {
@@ -88,7 +98,11 @@ impl Expression {
         Expression::LessThan(Box::from(self.clone()), Box::from(other.clone()))
     }
     fn slice(&self, begin: Option<Expression>, end: Option<Expression>) -> Expression {
-        Expression::Slice(Box::from(self.clone()), begin.map(Box::from), end.map(Box::from))
+        Expression::Slice(
+            Box::from(self.clone()),
+            begin.map(Box::from),
+            end.map(Box::from),
+        )
     }
     fn len(&self) -> Expression {
         Expression::Len(Box::from(self.clone()))
@@ -120,6 +134,24 @@ impl Expression {
     fn ln(&self) -> Expression {
         Expression::Ln(Box::from(self.clone()))
     }
+    fn sin(&self) -> Expression {
+        Expression::Sin(Box::from(self.clone()))
+    }
+    fn cos(&self) -> Expression {
+        Expression::Cos(Box::from(self.clone()))
+    }
+    fn tan(&self) -> Expression {
+        Expression::Tan(Box::from(self.clone()))
+    }
+    fn asn(&self) -> Expression {
+        Expression::Asn(Box::from(self.clone()))
+    }
+    fn acs(&self) -> Expression {
+        Expression::Acs(Box::from(self.clone()))
+    }
+    fn atn(&self) -> Expression {
+        Expression::Atn(Box::from(self.clone()))
+    }
     fn to_string(&self, env: &Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -142,39 +174,51 @@ impl Expression {
             Expression::LessThan(_, _) => self.to_string(env).map(|v| v.to_string()),
             Expression::GreaterThan(_, _) => self.to_string(env).map(|v| v.to_string()),
             Expression::Slice(string, begin, end) => {
-                match (string.to_string(env), begin.clone().map(|b| b.to_f64(env)), end.clone().map(|e| e.to_f64(env))) {
+                match (
+                    string.to_string(env),
+                    begin.clone().map(|b| b.to_f64(env)),
+                    end.clone().map(|e| e.to_f64(env)),
+                ) {
                     (Err(s), _, _) => Err(s),
                     (_, Some(Err(s)), _) => Err(s),
                     (_, _, Some(Err(s))) => Err(s),
                     (Ok(s), None, None) => Ok(s),
                     (Ok(s), Some(Ok(b)), None) => Ok(s[(b as usize - 1)..].to_string()),
                     (Ok(s), None, Some(Ok(e))) => Ok(s[..(e as usize)].to_string()),
-                    (Ok(s), Some(Ok(b)), Some(Ok(e))) => Ok(s[(b as usize - 1)..(e as usize)].to_string()),
+                    (Ok(s), Some(Ok(b)), Some(Ok(e))) => {
+                        Ok(s[(b as usize - 1)..(e as usize)].to_string())
+                    }
                 }
-            },
+            }
             Expression::Len(string_expression) => match string_expression.to_string(env) {
                 Ok(s) => Ok(s.len().to_string()),
-                Err(m) => Err(m)
+                Err(m) => Err(m),
             },
             Expression::Number(value) => Ok(value.to_string()),
             Expression::Str(number_value) => match number_value.to_string(env) {
                 Ok(value) => Ok(value),
-                Err(m) => Err(m)
+                Err(m) => Err(m),
             },
             Expression::Sgn(number_value) => match number_value.to_f64(env) {
-                Ok(value) => Ok(if value == 0.0 { "0".to_string() } else { value.signum().to_string() }),
-                Err(m) => Err(m)
+                Ok(value) => Ok(if value == 0.0 {
+                    "0".to_string()
+                } else {
+                    value.signum().to_string()
+                }),
+                Err(m) => Err(m),
             },
             Expression::Abs(number_value) => number_value.to_f64(env).map(|v| v.abs().to_string()),
-            Expression::Int(number_value) => number_value.to_f64(env).map(|v| (v as i32).to_string()),
+            Expression::Int(number_value) => {
+                number_value.to_f64(env).map(|v| (v as i32).to_string())
+            }
             Expression::Sqr(number_value) => number_value.to_f64(env).map(|v| v.sqrt().to_string()),
             Expression::Fn(function_name, parameter_values) => {
                 match env.functions.get(function_name) {
                     None => Err("No function found".to_string()),
                     Some(f) => match Self::create_fn_env(env, parameter_values, f) {
                         Ok(e) => f.body.to_string(&e),
-                        Err(m) => Err(m)
-                    }
+                        Err(m) => Err(m),
+                    },
                 }
             }
             Expression::RaiseTo(number, power) => match (number.to_f64(env), power.to_f64(env)) {
@@ -184,25 +228,35 @@ impl Expression {
             },
             Expression::Exp(number) => number.to_f64(env).map(|v| v.exp().to_string()),
             Expression::Ln(number) => number.to_f64(env).map(|v| v.ln().to_string()),
+            Expression::Sin(number) => number.to_f64(env).map(|v| v.sin().to_string()),
+            Expression::Cos(number) => number.to_f64(env).map(|v| v.cos().to_string()),
+            Expression::Tan(number) => number.to_f64(env).map(|v| v.tan().to_string()),
+            Expression::Asn(number) => number.to_f64(env).map(|v| v.asin().to_string()),
+            Expression::Acs(number) => number.to_f64(env).map(|v| v.acos().to_string()),
+            Expression::Atn(number) => number.to_f64(env).map(|v| v.atan().to_string()),
         }
     }
 
-    fn create_fn_env(env: &Env, parameter_values: &Vec<Expression>, f: &Function) -> Result<Env, String> {
+    fn create_fn_env(
+        env: &Env,
+        parameter_values: &Vec<Expression>,
+        f: &Function,
+    ) -> Result<Env, String> {
         let mut new_env = env.clone();
         for (name, value) in zip(&f.parameter_names, parameter_values) {
             if name.ends_with("$") {
                 match value.to_string(env) {
                     Ok(v) => {
                         new_env.string_variables.insert(name.to_string(), v);
-                    },
-                    Err(m) => return Err(m)
+                    }
+                    Err(m) => return Err(m),
                 }
             } else {
                 match value.to_f64(env) {
                     Ok(v) => {
                         new_env.number_variables.insert(name.to_string(), v);
                     }
-                    Err(m) => return Err(m)
+                    Err(m) => return Err(m),
                 }
             }
         }
@@ -213,13 +267,12 @@ impl Expression {
         match self {
             Expression::Integer(value) => Ok(*value as f64),
             Expression::Text(_text) => Err(format!("Expected a number, found {:#?}", self)),
-            Expression::NumberVariable(number_variable_name) =>
+            Expression::NumberVariable(number_variable_name) => {
                 match env.number_variables.get(number_variable_name) {
                     Some(value) => Ok(*value),
-                    None => {
-                        Err(format!("No variable {} found.", number_variable_name))
-                    },
-                },
+                    None => Err(format!("No variable {} found.", number_variable_name)),
+                }
+            }
             Expression::Plus(left, right) => match (left.to_f64(env), right.to_f64(env)) {
                 (Ok(l), Ok(r)) => Ok(l + r),
                 (Ok(_), Err(e)) => Err(e),
@@ -242,24 +295,30 @@ impl Expression {
             },
             Expression::AreEqual(_, _) => Err("AreEqual gives a bool, not an f64".to_string()),
             Expression::LessThan(_, _) => Err("LessThan gives a bool, not an f64".to_string()),
-            Expression::GreaterThan(_, _) => Err("GreaterThan gives a bool, not an f64".to_string()),
-            Expression::StringVariable(_) => Err("String variables hold a string, not an f64".to_string()),
+            Expression::GreaterThan(_, _) => {
+                Err("GreaterThan gives a bool, not an f64".to_string())
+            }
+            Expression::StringVariable(_) => {
+                Err("String variables hold a string, not an f64".to_string())
+            }
             Expression::Slice(_, _, _) => Err("A slice is not a number".to_string()),
             Expression::Len(string_expression) => match string_expression.to_string(env) {
                 Ok(value) => Ok(value.len() as f64),
-                Err(m) => Err(m)
+                Err(m) => Err(m),
             },
             Expression::Number(value) => Ok(*value),
             Expression::Str(_) => Err("Str returns a string, not a number".to_string()),
             Expression::Sgn(number_expression) => match number_expression.to_f64(env) {
                 Ok(value) => Ok(if value == 0.0 { 0.0 } else { value.signum() }),
-                Err(m) => Err(m)
+                Err(m) => Err(m),
             },
             Expression::Abs(number_expression) => match number_expression.to_f64(env) {
                 Ok(value) => Ok(value.abs()),
-                Err(m) => Err(m)
+                Err(m) => Err(m),
             },
-            Expression::Int(number_expression) => number_expression.to_f64(env).map(|v| v as i32 as f64),
+            Expression::Int(number_expression) => {
+                number_expression.to_f64(env).map(|v| v as i32 as f64)
+            }
             Expression::Sqr(number_expression) => number_expression.to_f64(env).map(|v| v.sqrt()),
             Expression::Fn(function_name, parameter_values) => {
                 match env.functions.get(function_name) {
@@ -271,15 +330,15 @@ impl Expression {
                                 match value.to_string(env) {
                                     Ok(v) => {
                                         new_env.string_variables.insert(name.to_string(), v);
-                                    },
-                                    Err(m) => return Err(m)
+                                    }
+                                    Err(m) => return Err(m),
                                 }
                             } else {
                                 match value.to_f64(env) {
                                     Ok(v) => {
                                         new_env.number_variables.insert(name.to_string(), v);
                                     }
-                                    Err(m) => return Err(m)
+                                    Err(m) => return Err(m),
                                 }
                             }
                         }
@@ -294,6 +353,12 @@ impl Expression {
             },
             Expression::Exp(number) => number.to_f64(env).map(|v| v.exp()),
             Expression::Ln(number) => number.to_f64(env).map(|v| v.ln()),
+            Expression::Sin(number) => number.to_f64(env).map(|v| v.sin()),
+            Expression::Cos(number) => number.to_f64(env).map(|v| v.cos()),
+            Expression::Tan(number) => number.to_f64(env).map(|v| v.tan()),
+            Expression::Asn(number) => number.to_f64(env).map(|v| v.asin()),
+            Expression::Acs(number) => number.to_f64(env).map(|v| v.acos()),
+            Expression::Atn(number) => number.to_f64(env).map(|v| v.atan()),
         }
     }
 
@@ -337,16 +402,26 @@ impl Expression {
             Expression::Len(_) => Err("Cannot convert a length to bool".to_string()),
             Expression::Number(_) => Err("Cannot convert a number to bool".to_string()),
             Expression::Str(_) => Err("Cannot convert a string to bool".to_string()),
-            Expression::Sgn(_) | Expression::Abs(_) | Expression::Int(_) | Expression::Sqr(_) | Expression::RaiseTo(_, _) | Expression::Exp(_) | Expression::Ln(_) => Err("Cannot convert a number to bool".to_string()),
+            Expression::Sgn(_)
+            | Expression::Abs(_)
+            | Expression::Int(_)
+            | Expression::Sqr(_)
+            | Expression::RaiseTo(_, _)
+            | Expression::Exp(_)
+            | Expression::Ln(_)
+            | Expression::Sin(_)
+            | Expression::Cos(_)
+            | Expression::Tan(_)
+            | Expression::Asn(_)
+            | Expression::Acs(_)
+            | Expression::Atn(_) => Err("Cannot convert a number to bool".to_string()),
             Expression::Fn(function_name, parameter_values) => {
                 match env.functions.get(function_name) {
                     None => Err("No function found".to_string()),
-                    Some(f) => {
-                        match Self::create_fn_env(env, parameter_values, &f) {
-                            Ok(e) => f.body.to_bool(&e),
-                            Err(m) => return Err(m)
-                        }
-                    }
+                    Some(f) => match Self::create_fn_env(env, parameter_values, &f) {
+                        Ok(e) => f.body.to_bool(&e),
+                        Err(m) => return Err(m),
+                    },
                 }
             }
         }
@@ -545,19 +620,24 @@ impl Command {
         Command::Next(variable_name.to_string())
     }
     fn def_fn(function_name: &str, parameter_names: Vec<&str>, body: &Expression) -> Command {
-        Command::DefFn(function_name.to_string(), parameter_names.iter().map(|v| v.to_string()).collect(), body.clone())
+        Command::DefFn(
+            function_name.to_string(),
+            parameter_names.iter().map(|v| v.to_string()).collect(),
+            body.clone(),
+        )
     }
     fn run(&self, env: &mut Env) -> Result<CommandResult, String> {
         match self {
-            Command::Let(variable_name, value) if variable_name.ends_with("$") =>
+            Command::Let(variable_name, value) if variable_name.ends_with("$") => {
                 match value.to_string(env) {
                     Ok(v) => {
                         env.string_variables.insert(variable_name.clone(), v);
                         Ok(CommandResult::Output(String::new()))
                     }
                     Err(msg) => Err(msg.to_string()),
-                },
-                Command::Let(variable_name, value) => match value.to_f64(env) {
+                }
+            }
+            Command::Let(variable_name, value) => match value.to_f64(env) {
                 Ok(number) => {
                     env.number_variables.insert(variable_name.clone(), number);
                     Ok(CommandResult::Output(String::new()))
@@ -688,10 +768,13 @@ impl Command {
             }
             Command::Data(_) => Ok(CommandResult::Output("".to_string())),
             Command::DefFn(function_name, parameter_names, body) => {
-                env.functions.insert(function_name.to_string(), Function {
-                    parameter_names: parameter_names.clone(),
-                    body: body.clone(),
-                });
+                env.functions.insert(
+                    function_name.to_string(),
+                    Function {
+                        parameter_names: parameter_names.clone(),
+                        body: body.clone(),
+                    },
+                );
                 Ok(CommandResult::Output("".to_string()))
             }
         }
@@ -791,10 +874,10 @@ struct Function {
 
 #[cfg(test)]
 mod tests {
+    use crate::LinesLimit::NoLimit;
     use crate::UserInputReader::RealStdin;
     use crate::*;
     use Command::*;
-    use crate::LinesLimit::NoLimit;
 
     #[test]
     fn let_and_print() {
@@ -811,10 +894,18 @@ mod tests {
     fn let_string() {
         let mut program = Program::new();
         program.add_line(10, Command::let_equal("a$", Expression::text("Hi")));
-        program.add_line(20, Print(vec!(Expression::string_variable("a$"), Expression::string_variable("a$"))));
+        program.add_line(
+            20,
+            Print(vec![
+                Expression::string_variable("a$"),
+                Expression::string_variable("a$"),
+            ]),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
-            Ok("Hi Hi\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("Hi Hi\n".to_string())
+        );
     }
 
     #[test]
@@ -1387,73 +1478,107 @@ mod tests {
     fn slice() {
         let mut program = Program::new();
         program.add_line(10, Command::let_equal("a$", Expression::text("abcdef")));
-        program.add_line(20, Command::for_loop("n", Expression::Integer(1), Expression::Integer(6), Expression::Integer(1)));
-        program.add_line(30, Command::Print(vec!(Expression::string_variable("a$").slice(
-            Some(Expression::number_variable("n")),
-            Some(Expression::Integer(6))
-        ))));
+        program.add_line(
+            20,
+            Command::for_loop(
+                "n",
+                Expression::Integer(1),
+                Expression::Integer(6),
+                Expression::Integer(1),
+            ),
+        );
+        program.add_line(
+            30,
+            Command::Print(vec![Expression::string_variable("a$").slice(
+                Some(Expression::number_variable("n")),
+                Some(Expression::Integer(6)),
+            )]),
+        );
         program.add_line(40, Command::next("n"));
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
-        Ok("abcdef\nbcdef\ncdef\ndef\nef\nf\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("abcdef\nbcdef\ncdef\ndef\nef\nf\n".to_string())
+        );
     }
 
     // 10 PRINT LEN "foo"
     #[test]
     fn len() {
         let mut program = Program::new();
-        program.add_line(10, Command::Print(vec!(Expression::text("foo").len())));
+        program.add_line(10, Command::Print(vec![Expression::text("foo").len()]));
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("3\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("3\n".to_string())
+        );
     }
 
     // 10 PRINT LEN STR$ 100.0000
     #[test]
     fn str() {
         let mut program = Program::new();
-        program.add_line(10, Print(vec!(Expression::Number(100.0000).str().len())));
+        program.add_line(10, Print(vec![Expression::Number(100.0000).str().len()]));
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("3\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("3\n".to_string())
+        );
     }
 
     // 10 PRINT SGN -10, SGN 0, SGN 10
     #[test]
     fn sgn() {
         let mut program = Program::new();
-        program.add_line(10, Print(vec!(
-            Expression::sgn(&Expression::Integer(-10)),
-            Expression::sgn(&Expression::Integer(0)),
-            Expression::sgn(&Expression::Integer(10))
-        )));
+        program.add_line(
+            10,
+            Print(vec![
+                Expression::sgn(&Expression::Integer(-10)),
+                Expression::sgn(&Expression::Integer(0)),
+                Expression::sgn(&Expression::Integer(10)),
+            ]),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("-1 0 1\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("-1 0 1\n".to_string())
+        );
     }
 
     // 10 PRINT ABS -2.5
     #[test]
     fn abs() {
         let mut program = Program::new();
-        program.add_line(10, Print(vec!(Expression::Number(-2.5).abs())));
+        program.add_line(10, Print(vec![Expression::Number(-2.5).abs()]));
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("2.5\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("2.5\n".to_string())
+        );
     }
 
     // 10 PRINT INT 2.5
     #[test]
     fn int() {
         let mut program = Program::new();
-        program.add_line(10, Print(vec!(Expression::Number(2.5).int())));
+        program.add_line(10, Print(vec![Expression::Number(2.5).int()]));
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("2\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("2\n".to_string())
+        );
     }
 
     // 10 PRINT SQR 4096
     #[test]
     fn sqr() {
         let mut program = Program::new();
-        program.add_line(10, Print(vec!(Expression::Number(4096.0).sqr())));
+        program.add_line(10, Print(vec![Expression::Number(4096.0).sqr()]));
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("64\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("64\n".to_string())
+        );
     }
 
     // 10 DEF FN s(x)=x*x
@@ -1461,10 +1586,26 @@ mod tests {
     #[test]
     fn def_fn() {
         let mut program = Program::new();
-        program.add_line(10, Command::def_fn("s", vec!("x"), &(Expression::number_variable("x") * Expression::number_variable("x"))));
-        program.add_line(20, Print(vec!(Expression::function("s", vec!(Expression::Number(4.0))))));
+        program.add_line(
+            10,
+            Command::def_fn(
+                "s",
+                vec!["x"],
+                &(Expression::number_variable("x") * Expression::number_variable("x")),
+            ),
+        );
+        program.add_line(
+            20,
+            Print(vec![Expression::function(
+                "s",
+                vec![Expression::Number(4.0)],
+            )]),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin), Ok("16\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("16\n".to_string())
+        );
     }
 
     // On the Spectrum it's actually an up arrow, not a ^
@@ -1472,9 +1613,15 @@ mod tests {
     #[test]
     fn raise_to() {
         let mut program = Program::new();
-        program.add_line(10, Print(vec!(Expression::Number(3.0).raise_to(Expression::Number(5.0)))));
+        program.add_line(
+            10,
+            Print(vec![
+                Expression::Number(3.0).raise_to(Expression::Number(5.0))
+            ]),
+        );
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
             Ok("243\n".to_string())
         );
     }
@@ -1483,20 +1630,96 @@ mod tests {
     #[test]
     fn exp() {
         let mut program = Program::new();
-        program.add_line(10, Print(vec!(Expression::Number(2.0).exp())));
+        program.add_line(10, Print(vec![Expression::Number(2.0).exp()]));
 
-        assert_eq!(program.run(LinesLimit::NoLimit, RealStdin),
-        Ok("7.38905609893065\n".to_string()));
+        assert_eq!(
+            program.run(LinesLimit::NoLimit, RealStdin),
+            Ok("7.38905609893065\n".to_string())
+        );
     }
 
     // 10 PRINT LN 5
     #[test]
     fn ln() {
         let mut program = Program::new();
-        program.add_line(10, Print(vec!(Expression::Number(5.0).ln())));
+        program.add_line(10, Print(vec![Expression::Number(5.0).ln()]));
 
-        assert_eq!(program.run(NoLimit, RealStdin),
-        Ok("1.6094379124341003\n".to_string()));
+        assert_eq!(
+            program.run(NoLimit, RealStdin),
+            Ok("1.6094379124341003\n".to_string())
+        );
+    }
+
+    // 10 PRINT SIN 2
+    #[test]
+    fn sin() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec![Expression::Number(2.0).sin()]));
+
+        assert_eq!(
+            program.run(NoLimit, RealStdin),
+            Ok("0.9092974268256817\n".to_string())
+        );
+    }
+
+    // 10 PRINT COS 2
+    #[test]
+    fn cos() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec![Expression::Number(2.0).cos()]));
+
+        assert_eq!(
+            program.run(NoLimit, RealStdin),
+            Ok("-0.4161468365471424\n".to_string())
+        );
+    }
+
+    // 10 PRINT TAN 2
+    #[test]
+    fn tan() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec![Expression::Number(2.0).tan()]));
+
+        assert_eq!(
+            program.run(NoLimit, RealStdin),
+            Ok("-2.185039863261519\n".to_string())
+        );
+    }
+
+    // 10 PRINT ASN 1
+    #[test]
+    fn asn() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec![Expression::Number(1.0).asn()]));
+
+        assert_eq!(
+            program.run(NoLimit, RealStdin),
+            Ok("1.5707963267948966\n".to_string())
+        );
+    }
+
+    // 10 PRINT ACS 0
+    #[test]
+    fn acs() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec![Expression::Number(0.0).acs()]));
+
+        assert_eq!(
+            program.run(NoLimit, RealStdin),
+            Ok("1.5707963267948966\n".to_string())
+        );
+    }
+
+    // 10 PRINT ATN 2
+    #[test]
+    fn atn() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec![Expression::Number(2.0).atn()]));
+
+        assert_eq!(
+            program.run(NoLimit, RealStdin),
+            Ok("1.1071487177940904\n".to_string())
+        );
     }
 }
 
