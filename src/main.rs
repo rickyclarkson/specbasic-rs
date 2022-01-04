@@ -44,6 +44,7 @@ enum Expression {
     Asn(Box<Expression>),
     Acs(Box<Expression>),
     Atn(Box<Expression>),
+    Rnd,
 }
 
 impl ops::Add for Expression {
@@ -152,7 +153,7 @@ impl Expression {
     fn atn(&self) -> Expression {
         Expression::Atn(Box::from(self.clone()))
     }
-    fn to_string(&self, env: &Env) -> Result<String, String> {
+    fn to_string(&self, env: &mut Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
             Expression::Text(text) => Ok(text.to_string()),
@@ -213,10 +214,10 @@ impl Expression {
             }
             Expression::Sqr(number_value) => number_value.to_f64(env).map(|v| v.sqrt().to_string()),
             Expression::Fn(function_name, parameter_values) => {
-                match env.functions.get(function_name) {
+                match env.clone().functions.get(function_name) {
                     None => Err("No function found".to_string()),
                     Some(f) => match Self::create_fn_env(env, parameter_values, f) {
-                        Ok(e) => f.body.to_string(&e),
+                        Ok(mut e) => f.body.to_string(&mut e),
                         Err(m) => Err(m),
                     },
                 }
@@ -234,11 +235,15 @@ impl Expression {
             Expression::Asn(number) => number.to_f64(env).map(|v| v.asin().to_string()),
             Expression::Acs(number) => number.to_f64(env).map(|v| v.acos().to_string()),
             Expression::Atn(number) => number.to_f64(env).map(|v| v.atan().to_string()),
+            Expression::Rnd => {
+                env.seed += 1; // one of the worst random number generators.
+                Ok(env.seed.to_string())
+            }
         }
     }
 
     fn create_fn_env(
-        env: &Env,
+        env: &mut Env,
         parameter_values: &Vec<Expression>,
         f: &Function,
     ) -> Result<Env, String> {
@@ -263,7 +268,7 @@ impl Expression {
         Ok(new_env.clone())
     }
 
-    fn to_f64(&self, env: &Env) -> Result<f64, String> {
+    fn to_f64(&self, env: &mut Env) -> Result<f64, String> {
         match self {
             Expression::Integer(value) => Ok(*value as f64),
             Expression::Text(_text) => Err(format!("Expected a number, found {:#?}", self)),
@@ -321,7 +326,7 @@ impl Expression {
             }
             Expression::Sqr(number_expression) => number_expression.to_f64(env).map(|v| v.sqrt()),
             Expression::Fn(function_name, parameter_values) => {
-                match env.functions.get(function_name) {
+                match env.clone().functions.get(function_name) {
                     None => Err("No function found".to_string()),
                     Some(f) => {
                         let mut new_env = env.clone();
@@ -342,7 +347,7 @@ impl Expression {
                                 }
                             }
                         }
-                        f.body.to_f64(&new_env)
+                        f.body.to_f64(&mut new_env)
                     }
                 }
             }
@@ -359,10 +364,11 @@ impl Expression {
             Expression::Asn(number) => number.to_f64(env).map(|v| v.asin()),
             Expression::Acs(number) => number.to_f64(env).map(|v| v.acos()),
             Expression::Atn(number) => number.to_f64(env).map(|v| v.atan()),
+            Expression::Rnd => panic!(),
         }
     }
 
-    fn to_bool(&self, env: &Env) -> Result<bool, String> {
+    fn to_bool(&self, env: &mut Env) -> Result<bool, String> {
         match self {
             Expression::Integer(value) => Err(value.to_string()),
             Expression::Text(value) => Err(value.to_string()),
@@ -414,12 +420,13 @@ impl Expression {
             | Expression::Tan(_)
             | Expression::Asn(_)
             | Expression::Acs(_)
-            | Expression::Atn(_) => Err("Cannot convert a number to bool".to_string()),
+            | Expression::Atn(_)
+            | Expression::Rnd => Err("Cannot convert a number to bool".to_string()),
             Expression::Fn(function_name, parameter_values) => {
-                match env.functions.get(function_name) {
+                match env.clone().functions.get(function_name) {
                     None => Err("No function found".to_string()),
                     Some(f) => match Self::create_fn_env(env, parameter_values, &f) {
-                        Ok(e) => f.body.to_bool(&e),
+                        Ok(mut e) => f.body.to_bool(&mut e),
                         Err(m) => return Err(m),
                     },
                 }
@@ -462,6 +469,7 @@ struct Env {
     current_data_line_number: usize,
     current_data_column: usize,
     functions: HashMap<String, Function>,
+    seed: u64,
 }
 
 impl Env {
@@ -502,6 +510,7 @@ impl Env {
             current_data_line_number: 0,
             current_data_column: 0,
             functions: HashMap::new(),
+            seed: 0,
         }
     }
 
@@ -602,6 +611,7 @@ enum Command {
     Read(Vec<Expression>),
     Data(Vec<Expression>),
     DefFn(String, Vec<String>, Expression),
+    Randomize(Expression),
 }
 
 impl Command {
@@ -777,6 +787,10 @@ impl Command {
                 );
                 Ok(CommandResult::Output("".to_string()))
             }
+            Command::Randomize(seed) => seed.to_f64(env).map(|seed| {
+                env.seed = seed.to_bits();
+                CommandResult::Output("".to_string())
+            })
         }
     }
 }
@@ -1720,6 +1734,46 @@ mod tests {
             program.run(NoLimit, RealStdin),
             Ok("1.1071487177940904\n".to_string())
         );
+    }
+
+    // 10 PRINT RND
+    // 20 PRINT RND
+    #[test]
+    fn rnd() {
+        let mut program = Program::new();
+        program.add_line(10, Print(vec![Expression::Rnd]));
+        program.add_line(20, Print(vec![Expression::Rnd]));
+
+        match program.run(NoLimit, RealStdin) {
+            Ok(output) => {
+                let lines: Vec<String> = output.split_whitespace().map(|v| v.to_string()).collect();
+                assert_eq!(lines.len(), 2);
+                assert_ne!(lines[0], lines[1]);
+            }
+            Err(m) => panic!("{}", m),
+        }
+    }
+
+    // 10 RANDOMIZE 2
+    // 20 PRINT RND
+    // 30 RANDOMIZE 2
+    // 40 PRINT RND
+    #[test]
+    fn randomize() {
+        let mut program = Program::new();
+        program.add_line(10, Command::Randomize(Expression::Number(2.0)));
+        program.add_line(20, Print(vec![Expression::Rnd]));
+        program.add_line(30, Command::Randomize(Expression::Number(2.0)));
+        program.add_line(40, Print(vec![Expression::Rnd]));
+
+        match program.run(NoLimit, RealStdin) {
+            Ok(output) => {
+                let lines: Vec<String> = output.split_whitespace().map(|v| v.to_string()).collect();
+                assert_eq!(lines.len(), 2);
+                assert_eq!(lines[0], lines[1]);
+            }
+            Err(m) => panic!("{}", m),
+        }
     }
 }
 
