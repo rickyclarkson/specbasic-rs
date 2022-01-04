@@ -790,7 +790,7 @@ impl Command {
             Command::Randomize(seed) => seed.to_f64(env).map(|seed| {
                 env.seed = seed.to_bits();
                 CommandResult::Output("".to_string())
-            })
+            }),
         }
     }
 }
