@@ -45,6 +45,7 @@ enum Expression {
     Acs(Box<Expression>),
     Atn(Box<Expression>),
     Rnd,
+    ArrayElement(String, Box<Expression>),
 }
 
 impl ops::Add for Expression {
@@ -153,6 +154,9 @@ impl Expression {
     fn atn(&self) -> Expression {
         Expression::Atn(Box::from(self.clone()))
     }
+    fn array_element(name: &str, length: Expression) -> Expression {
+        Expression::ArrayElement(name.to_string(), Box::from(length))
+    }
     fn to_string(&self, env: &mut Env) -> Result<String, String> {
         match self {
             Expression::Integer(value) => Ok(value.to_string()),
@@ -239,6 +243,12 @@ impl Expression {
                 env.seed += 1; // one of the worst random number generators.
                 Ok(env.seed.to_string())
             }
+            Expression::ArrayElement(array_name, index) =>
+                match (env.clone().number_arrays.get(array_name), index.to_f64(env)) {
+                    (None, _) => Err(format!("No number array found with the name {}", array_name)),
+                    (_, Err(m)) => Err(m),
+                    (Some(array), Ok(index)) => Ok(array.data[index as usize - 1].unwrap_or(0.0).to_string()),
+                }
         }
     }
 
@@ -365,6 +375,12 @@ impl Expression {
             Expression::Acs(number) => number.to_f64(env).map(|v| v.acos()),
             Expression::Atn(number) => number.to_f64(env).map(|v| v.atan()),
             Expression::Rnd => panic!(),
+            Expression::ArrayElement(array_name, index) =>
+                match (env.clone().number_arrays.get(array_name), index.to_f64(env)) {
+                    (None, _) => Err(format!("No number array found with the name {}", array_name)),
+                    (_, Err(m)) => Err(m),
+                    (Some(array), Ok(index)) => Ok(array.data[index as usize].unwrap_or(0.0)),
+                }
         }
     }
 
@@ -421,7 +437,8 @@ impl Expression {
             | Expression::Asn(_)
             | Expression::Acs(_)
             | Expression::Atn(_)
-            | Expression::Rnd => Err("Cannot convert a number to bool".to_string()),
+            | Expression::Rnd
+            | Expression::ArrayElement(_, _) => Err("Cannot convert a number to bool".to_string()),
             Expression::Fn(function_name, parameter_values) => {
                 match env.clone().functions.get(function_name) {
                     None => Err("No function found".to_string()),
@@ -470,6 +487,7 @@ struct Env {
     current_data_column: usize,
     functions: HashMap<String, Function>,
     seed: u64,
+    number_arrays: HashMap<String, Array<f64>>,
 }
 
 impl Env {
@@ -491,8 +509,9 @@ impl Env {
                                 .iter()
                                 .map(|expression| match expression {
                                     Expression::Integer(value) => (*line_number, value.to_string()),
+                                    Expression::Number(value) => (*line_number, value.to_string()),
                                     Expression::Text(value) => (*line_number, value.to_string()),
-                                    _ => panic!(),
+                                    _ => panic!("Data not supported: {:#?}", expression),
                                 })
                                 .collect();
                             res
@@ -511,6 +530,7 @@ impl Env {
             current_data_column: 0,
             functions: HashMap::new(),
             seed: 0,
+            number_arrays: HashMap::new(),
         }
     }
 
@@ -612,6 +632,7 @@ enum Command {
     Data(Vec<Expression>),
     DefFn(String, Vec<String>, Expression),
     Randomize(Expression),
+    Dim(Expression),
 }
 
 impl Command {
@@ -771,7 +792,16 @@ impl Command {
                             }
                             Err(message) => return Err(message),
                         },
-                        _ => return Err("Can only read into variables".to_string()),
+                        Expression::ArrayElement(name, index) =>
+                            match (index.to_f64(env), env.number_data()) {
+                                (Ok(index), Ok(value)) => match env.number_arrays.get_mut(name) {
+                                    None => return Err(format!("No array named {} found", name)),
+                                    Some(array) => array.data[index as usize - 1] = Some(value),
+                                }
+                                (Err(m), _) => return Err(m),
+                                (_, Err(m)) => return Err(m),
+                            }
+                        _ => return Err(format!("Can only read into variables, found {:#?}", v)),
                     }
                 }
                 Ok(CommandResult::Output("".to_string()))
@@ -791,6 +821,17 @@ impl Command {
                 env.seed = seed.to_bits();
                 CommandResult::Output("".to_string())
             }),
+            Command::Dim(expression) => match expression {
+                Expression::ArrayElement(array_name, size) =>
+                    match size.to_f64(env) {
+                        Ok(size) => {
+                            env.number_arrays.insert(array_name.to_string(), Array::new(size as usize));
+                            Ok(CommandResult::Output("".to_string()))
+                        },
+                        Err(m) => Err(m),
+                    }
+                _ => Err("DIM needs an array declaration".to_string())
+            }
         }
     }
 }
@@ -884,6 +925,21 @@ impl Program {
 struct Function {
     parameter_names: Vec<String>,
     body: Expression,
+}
+
+#[derive(Clone)]
+struct Array<T> {
+    length: usize,
+    data: Vec<Option<T>>,
+}
+
+impl <T : Clone> Array<T> {
+    fn new(length: usize) -> Array<T> {
+        Array {
+            length,
+            data: vec![None; length],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1774,6 +1830,36 @@ mod tests {
             }
             Err(m) => panic!("{}", m),
         }
+    }
+
+    // 5 DIM b(10)
+    // 10 FOR n=l TO 10
+    // 20 READ b(n)
+    // 30 NEXT n
+    // 40 PRINT b(10)
+    // 50 DATA 10,2,5,19,16,3,11,1,0,6
+    #[test]
+    fn dim() {
+        let mut program = Program::new();
+        program.add_line(5, Dim(Expression::array_element("b", Expression::Number(10.0))));
+        program.add_line(10, Command::for_loop("n", Expression::Number(1.0), Expression::Number(10.0), Expression::Number(1.0)));
+        program.add_line(20, Read(vec![Expression::array_element("b", Expression::number_variable("n"))]));
+        program.add_line(30, Command::next("n"));
+        program.add_line(40, Print(vec![Expression::array_element("b", Expression::Number(10.0))]));
+        program.add_line(50, Data(vec![
+            Expression::Number(10.0),
+            Expression::Number(2.0),
+            Expression::Number(5.0),
+            Expression::Number(19.0),
+            Expression::Number(16.0),
+            Expression::Number(3.0),
+            Expression::Number(11.0),
+            Expression::Number(1.0),
+            Expression::Number(0.0),
+            Expression::Number(6.0),
+        ]));
+
+        assert_eq!(program.run(NoLimit, RealStdin), Ok("6\n".to_string()));
     }
 }
 
