@@ -244,13 +244,18 @@ impl Expression {
                 Ok(env.seed.to_string())
             }
             Expression::ArrayElement(array_name, indices) => {
-                let mut indices_values = vec!();
+                let mut indices_values = vec![];
                 for index in indices {
                     indices_values.push(index.to_f64(env).unwrap());
                 }
                 match env.clone().number_arrays.get(array_name) {
-                    None => Err(format!("No number array found with the name {}", array_name)),
-                    Some(array) => Ok(array.data[indices_values[0] as usize - 1].unwrap_or(0.0).to_string()),
+                    None => Err(format!(
+                        "No number array found with the name {}",
+                        array_name
+                    )),
+                    Some(array) => Ok(array.data[indices_values[0] as usize - 1]
+                        .unwrap_or(0.0)
+                        .to_string()),
                 }
             }
         }
@@ -380,12 +385,15 @@ impl Expression {
             Expression::Atn(number) => number.to_f64(env).map(|v| v.atan()),
             Expression::Rnd => panic!(),
             Expression::ArrayElement(array_name, indices) => {
-                let mut indices_values = vec!();
+                let mut indices_values = vec![];
                 for index in indices {
                     indices_values.push(index.to_f64(env).unwrap());
                 }
                 match env.clone().number_arrays.get(array_name) {
-                    None => Err(format!("No number array found with the name {}", array_name)),
+                    None => Err(format!(
+                        "No number array found with the name {}",
+                        array_name
+                    )),
                     Some(array) => Ok(array.data[indices_values[0] as usize].unwrap_or(0.0)),
                 }
             }
@@ -676,19 +684,21 @@ impl Command {
                     Err(msg) => Err(msg.to_string()),
                 }
             }
-            Command::Let(Expression::NumberVariable(variable_name), value) => match value.to_f64(env) {
-                Ok(number) => {
-                    env.number_variables.insert(variable_name.clone(), number);
-                    Ok(CommandResult::Output(String::new()))
+            Command::Let(Expression::NumberVariable(variable_name), value) => {
+                match value.to_f64(env) {
+                    Ok(number) => {
+                        env.number_variables.insert(variable_name.clone(), number);
+                        Ok(CommandResult::Output(String::new()))
+                    }
+                    Err(msg) => Err(msg.to_string()),
                 }
-                Err(msg) => Err(msg.to_string()),
-            },
+            }
             Command::Let(Expression::ArrayElement(array_name, indices), value) => {
-                let mut indices_values = vec!();
+                let mut indices_values = vec![];
                 for index in indices {
                     match index.to_f64(env) {
                         Ok(index) => indices_values.push(index),
-                        Err(m) => return Err(m)
+                        Err(m) => return Err(m),
                     }
                 }
 
@@ -696,7 +706,7 @@ impl Command {
                 array1.data[indices_values[0] as usize] = Some(value.to_f64(env).unwrap());
                 env.number_arrays.insert(array_name.to_string(), array1);
                 Ok(CommandResult::Output("".to_string()))
-            },
+            }
             Command::Let(_, _) => panic!(),
             Command::Goto(line_number) => Ok(CommandResult::Jump(*line_number)),
             Command::Print(expressions) => Ok(CommandResult::Output(
@@ -816,15 +826,17 @@ impl Command {
                             Err(message) => return Err(message),
                         },
                         Expression::ArrayElement(name, indices) => {
-                            let mut indices_values = vec!();
+                            let mut indices_values = vec![];
                             for index in indices {
                                 indices_values.push(index.to_f64(env).unwrap());
                             }
                             match env.number_data() {
                                 Ok(value) => match env.number_arrays.get_mut(name) {
                                     None => return Err(format!("No array named {} found", name)),
-                                    Some(array) => array.data[indices_values[0] as usize - 1] = Some(value),
-                                }
+                                    Some(array) => {
+                                        array.data[indices_values[0] as usize - 1] = Some(value)
+                                    }
+                                },
                                 Err(m) => return Err(m),
                             }
                         }
@@ -850,14 +862,15 @@ impl Command {
             }),
             Command::Dim(expression) => match expression {
                 Expression::ArrayElement(array_name, sizes) => {
-                    let mut sizes_values = vec!();
+                    let mut sizes_values = vec![];
                     for size in sizes {
                         sizes_values.push(size.to_f64(env).unwrap());
                     }
-                    env.number_arrays.insert(array_name.to_string(), Array::new(sizes_values[0] as usize));
+                    env.number_arrays
+                        .insert(array_name.to_string(), Array::new(sizes_values[0] as usize));
                     Ok(CommandResult::Output("".to_string()))
                 }
-                _ => Err("DIM needs an array declaration".to_string())
+                _ => Err("DIM needs an array declaration".to_string()),
             },
         }
     }
@@ -960,7 +973,7 @@ struct Array<T> {
     data: Vec<Option<T>>,
 }
 
-impl <T : Clone> Array<T> {
+impl<T: Clone> Array<T> {
     fn new(length: usize) -> Array<T> {
         Array {
             length,
@@ -980,7 +993,10 @@ mod tests {
     fn let_and_print() {
         let mut program = Program::new();
         program.add_line(20, Print(vec![Expression::number_variable("a")]));
-        program.add_line(10, Let(Expression::number_variable("a"), Expression::Integer(10)));
+        program.add_line(
+            10,
+            Let(Expression::number_variable("a"), Expression::Integer(10)),
+        );
         let output = program.run(LinesLimit::NoLimit, UserInputReader::RealStdin);
         assert_eq!(output, Ok("10\n".to_string()));
     }
@@ -990,7 +1006,10 @@ mod tests {
     #[test]
     fn let_string() {
         let mut program = Program::new();
-        program.add_line(10, Command::let_equal(Expression::string_variable("a$"), Expression::text("Hi")));
+        program.add_line(
+            10,
+            Command::let_equal(Expression::string_variable("a$"), Expression::text("Hi")),
+        );
         program.add_line(
             20,
             Print(vec![
@@ -1010,8 +1029,14 @@ mod tests {
         let mut program = Program::new();
         let number_variable = Expression::number_variable;
         program.add_line(20, Print(vec![number_variable("a") + number_variable("b")]));
-        program.add_line(10, Let(Expression::number_variable("a"), Expression::Integer(10)));
-        program.add_line(15, Let(Expression::number_variable("b"), Expression::Integer(15)));
+        program.add_line(
+            10,
+            Let(Expression::number_variable("a"), Expression::Integer(10)),
+        );
+        program.add_line(
+            15,
+            Let(Expression::number_variable("b"), Expression::Integer(15)),
+        );
 
         assert_eq!(
             program.run(LinesLimit::NoLimit, UserInputReader::RealStdin),
@@ -1022,8 +1047,14 @@ mod tests {
     #[test]
     fn print_with_comma() {
         let mut program = Program::new();
-        program.add_line(10, Let(Expression::number_variable("a"), Expression::Integer(10)));
-        program.add_line(15, Let(Expression::number_variable("b"), Expression::Integer(15)));
+        program.add_line(
+            10,
+            Let(Expression::number_variable("a"), Expression::Integer(10)),
+        );
+        program.add_line(
+            15,
+            Let(Expression::number_variable("b"), Expression::Integer(15)),
+        );
         program.add_line(
             20,
             Print(vec![
@@ -1356,7 +1387,10 @@ mod tests {
     #[test]
     fn nested_for() {
         let mut program = Program::new();
-        program.add_line(5, Command::let_equal(Expression::number_variable("n"), Expression::Integer(0)));
+        program.add_line(
+            5,
+            Command::let_equal(Expression::number_variable("n"), Expression::Integer(0)),
+        );
         program.add_line(
             10,
             Command::for_loop(
@@ -1386,7 +1420,10 @@ mod tests {
             40,
             If(
                 Expression::number_variable("c").greater_than(&Expression::number_variable("n")),
-                vec![Command::let_equal(Expression::number_variable("n"), Expression::number_variable("c"))],
+                vec![Command::let_equal(
+                    Expression::number_variable("n"),
+                    Expression::number_variable("c"),
+                )],
             ),
         );
         program.add_line(50, Command::next("b"));
@@ -1574,7 +1611,13 @@ mod tests {
     #[test]
     fn slice() {
         let mut program = Program::new();
-        program.add_line(10, Command::let_equal(Expression::string_variable("a$"), Expression::text("abcdef")));
+        program.add_line(
+            10,
+            Command::let_equal(
+                Expression::string_variable("a$"),
+                Expression::text("abcdef"),
+            ),
+        );
         program.add_line(
             20,
             Command::for_loop(
@@ -1868,23 +1911,52 @@ mod tests {
     #[test]
     fn dim() {
         let mut program = Program::new();
-        program.add_line(5, Dim(Expression::array_element("b", vec!(Expression::Number(10.0)))));
-        program.add_line(10, Command::for_loop("n", Expression::Number(1.0), Expression::Number(10.0), Expression::Number(1.0)));
-        program.add_line(20, Read(vec![Expression::array_element("b", vec!(Expression::number_variable("n")))]));
+        program.add_line(
+            5,
+            Dim(Expression::array_element(
+                "b",
+                vec![Expression::Number(10.0)],
+            )),
+        );
+        program.add_line(
+            10,
+            Command::for_loop(
+                "n",
+                Expression::Number(1.0),
+                Expression::Number(10.0),
+                Expression::Number(1.0),
+            ),
+        );
+        program.add_line(
+            20,
+            Read(vec![Expression::array_element(
+                "b",
+                vec![Expression::number_variable("n")],
+            )]),
+        );
         program.add_line(30, Command::next("n"));
-        program.add_line(40, Print(vec![Expression::array_element("b", vec!(Expression::Number(10.0)))]));
-        program.add_line(50, Data(vec![
-            Expression::Number(10.0),
-            Expression::Number(2.0),
-            Expression::Number(5.0),
-            Expression::Number(19.0),
-            Expression::Number(16.0),
-            Expression::Number(3.0),
-            Expression::Number(11.0),
-            Expression::Number(1.0),
-            Expression::Number(0.0),
-            Expression::Number(6.0),
-        ]));
+        program.add_line(
+            40,
+            Print(vec![Expression::array_element(
+                "b",
+                vec![Expression::Number(10.0)],
+            )]),
+        );
+        program.add_line(
+            50,
+            Data(vec![
+                Expression::Number(10.0),
+                Expression::Number(2.0),
+                Expression::Number(5.0),
+                Expression::Number(19.0),
+                Expression::Number(16.0),
+                Expression::Number(3.0),
+                Expression::Number(11.0),
+                Expression::Number(1.0),
+                Expression::Number(0.0),
+                Expression::Number(6.0),
+            ]),
+        );
 
         assert_eq!(program.run(NoLimit, RealStdin), Ok("6\n".to_string()));
     }
@@ -1892,15 +1964,38 @@ mod tests {
     // 10 DIM a$(5,10)
     // 20 LET a$(2)="1234567890"
     // 30 PRINT a$(2),a$(2,7)
-    // #[test]
+    #[test]
     fn string_array() {
         let mut program = Program::new();
-        program.add_line(10, Dim(Expression::array_element("a$", vec!(Expression::Number(5.0), Expression::Number(10.0)))));
-        program.add_line(20, Let(Expression::array_element("a$", vec!(Expression::Number(2.0))), Expression::text("1234567890")));
-        program.add_line(30, Print(vec!(Expression::array_element("a$", vec!(Expression::Number(2.0))),
-        Expression::array_element("a$", vec!(Expression::Number(2.0), Expression::Number(7.0))))));
+        program.add_line(
+            10,
+            Dim(Expression::array_element(
+                "a$",
+                vec![Expression::Number(5.0), Expression::Number(10.0)],
+            )),
+        );
+        program.add_line(
+            20,
+            Let(
+                Expression::array_element("a$", vec![Expression::Number(2.0)]),
+                Expression::text("1234567890"),
+            ),
+        );
+        program.add_line(
+            30,
+            Print(vec![
+                Expression::array_element("a$", vec![Expression::Number(2.0)]),
+                Expression::array_element(
+                    "a$",
+                    vec![Expression::Number(2.0), Expression::Number(7.0)],
+                ),
+            ]),
+        );
 
-        assert_eq!(program.run(NoLimit, RealStdin), Ok("1234567890 7\n".to_string()));
+        assert_eq!(
+            program.run(NoLimit, RealStdin),
+            Ok("1234567890 7\n".to_string())
+        );
     }
 }
 
